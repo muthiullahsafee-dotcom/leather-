@@ -1,0 +1,5 @@
+node_modules/
+database/data.db
+database/data.db-shm
+database/data.db-wal
+*.log
