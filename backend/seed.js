@@ -1,18 +1,16 @@
 const db = require('./db');
 const { init } = require('./init');
 
-init();
-
-const q = (sql) => db.prepare(sql);
-
-function isEmpty(table) {
-  return q(`SELECT COUNT(*) AS c FROM ${table}`).get().c === 0;
+async function isEmpty(t) {
+  const r = await db.get(`SELECT COUNT(*) AS c FROM ${t}`);
+  return r.c === 0;
 }
 
-function seed() {
+async function seed() {
+  await init();
   const seeded = [];
 
-  if (isEmpty('products')) {
+  if (await isEmpty('products')) {
     const products = [
       ['LS1', 'Leather Boots Black With TPR', 1499, '40,41,42,43,44', 'TPR'],
       ['LS2', 'Leather Loafer Tan Side Buckle', 999, '40,41,42,43,44', 'TPR'],
@@ -23,12 +21,22 @@ function seed() {
       ['LS7', 'Leather Loafer Black Plain Mesh', 999, '40,41,42,43,44', 'TPR'],
       ['LS8', 'Leather Loafer Black Plain Mesh', 999, '40,41,42,43,44', 'TPR']
     ];
-    const ins = q('INSERT INTO products (code, name, price, sizes_available, sole_type) VALUES (?, ?, ?, ?, ?)');
-    for (const p of products) ins.run(...p);
+    try {
+      await db.tx(async (x) => {
+        for (const p of products) {
+          await x.run('INSERT INTO products (code, name, price, sizes_available, sole_type) VALUES ($1, $2, $3, $4, $5)', p);
+        }
+      });
+    } catch (e) {
+      // ASSUMPTION-NEEDED: a code uniqueness conflict (e.g. re-seeding a DB that already
+      // has products but other tables empty) rolls back cleanly; report rather than guess.
+      console.error('PRODUCTS SEED FAILED:', e.message);
+      throw e;
+    }
     seeded.push('products');
   }
 
-  if (isEmpty('customers')) {
+  if (await isEmpty('customers')) {
     const customers = [
       ['Abdul Rahman Traders', '+91 98400 12345', 'Ambur, Tamil Nadu', 'Wholesale'],
       ['Al Noor Exports', '+91 98400 34567', 'Chennai, Tamil Nadu', 'Export'],
@@ -36,29 +44,29 @@ function seed() {
       ['Style Point Retail', '+91 98400 56789', 'Vellore, Tamil Nadu', 'Retail'],
       ['Kamal Stores', '+91 98400 67890', 'Ambur, Tamil Nadu', 'Retail']
     ];
-    const ins = q('INSERT INTO customers (name, phone, location, customer_type) VALUES (?, ?, ?, ?)');
-    for (const c of customers) ins.run(...c);
+    const ins = 'INSERT INTO customers (name, phone, location, customer_type) VALUES ($1, $2, $3, $4)';
+    for (const c of customers) await db.run(ins, c);
     seeded.push('customers');
   }
 
-  const prodId = (code) => q('SELECT id FROM products WHERE code = ?').get(code).id;
-  const custId = (name) => q('SELECT id FROM customers WHERE name = ?').get(name).id;
+  async function prodId(code) {
+    return (await db.get('SELECT id FROM products WHERE code = $1', [code])).id;
+  }
+  async function custId(name) {
+    return (await db.get('SELECT id FROM customers WHERE name = $1', [name])).id;
+  }
 
-  if (isEmpty('orders')) {
+  if (await isEmpty('orders')) {
     const orders = [
       {
         customer: 'Kamal Stores', order_type: 'Single Pair', order_date: '2026-08-03',
         status: 'Delivered', payment_status: 'Paid', is_export: 0,
-        items: [
-          { product_code: 'LS4', size: '41', quantity: 5, unit_price: 999, unit_cost: 620 }
-        ]
+        items: [{ product_code: 'LS4', size: '41', quantity: 5, unit_price: 999, unit_cost: 620 }]
       },
       {
         customer: 'Abdul Rahman Traders', order_type: 'Wholesale', order_date: '2026-08-18',
         status: 'Shipped', payment_status: 'Paid', is_export: 0,
-        items: [
-          { product_code: 'LS1', size: '42', quantity: 100, unit_price: 1250, unit_cost: 950 }
-        ]
+        items: [{ product_code: 'LS1', size: '42', quantity: 100, unit_price: 1250, unit_cost: 950 }]
       },
       {
         customer: 'Raj Leather Footwear', order_type: 'Wholesale', order_date: '2026-09-02',
@@ -81,56 +89,60 @@ function seed() {
       {
         customer: 'Style Point Retail', order_type: 'Single Pair', order_date: '2026-09-18',
         status: 'Pending', payment_status: 'Unpaid', is_export: 0,
-        items: [
-          { product_code: 'LS6', size: '42', quantity: 2, unit_price: 999, unit_cost: 620 }
-        ]
+        items: [{ product_code: 'LS6', size: '42', quantity: 2, unit_price: 999, unit_cost: 620 }]
       },
       {
         customer: 'Abdul Rahman Traders', order_type: 'Wholesale', order_date: '2026-08-25',
         status: 'Cancelled', payment_status: 'Unpaid', is_export: 0,
-        items: [
-          { product_code: 'LS5', size: '44', quantity: 50, unit_price: 850, unit_cost: 620 }
-        ]
+        items: [{ product_code: 'LS5', size: '44', quantity: 50, unit_price: 850, unit_cost: 620 }]
       }
     ];
 
-    const insOrder = q(`INSERT INTO orders
-      (customer_id, order_type, order_date, status, payment_status, total_amount,
-       is_export, export_country, shipment_date, shipping_method, tracking_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    const insItem = q('INSERT INTO order_items (order_id, product_id, size, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?)');
-
-    for (const o of orders) {
-      const total = o.items.reduce((s, i) => s + i.unit_price * i.quantity, 0);
-      const res = insOrder.run(
-        custId(o.customer), o.order_type, o.order_date, o.status, o.payment_status, total,
-        o.is_export, o.export_country || null, o.shipment_date || null,
-        o.shipping_method || null, o.tracking_ref || null
-      );
-      for (const item of o.items) {
-        insItem.run(res.lastInsertRowid, prodId(item.product_code), item.size, item.quantity, item.unit_price, item.unit_cost);
+    await db.tx(async (x) => {
+      for (const o of orders) {
+        const total = o.items.reduce((s, i) => s + i.unit_price * i.quantity, 0);
+        const r = await x.run(`INSERT INTO orders
+          (customer_id, order_type, order_date, status, payment_status, total_amount,
+           is_export, export_country, shipment_date, shipping_method, tracking_ref)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          RETURNING id`,
+          [
+            await custId(o.customer), o.order_type, o.order_date, o.status, o.payment_status, total,
+            o.is_export, o.export_country || null, o.shipment_date || null,
+            o.shipping_method || null, o.tracking_ref || null
+          ]
+        );
+        const orderId = r.lastId;
+        for (const item of o.items) {
+          await x.run(
+            'INSERT INTO order_items (order_id, product_id, size, quantity, unit_price, unit_cost) VALUES ($1, $2, $3, $4, $5, $6)',
+            [orderId, await prodId(item.product_code), item.size, item.quantity, item.unit_price, item.unit_cost]
+          );
+        }
       }
-    }
+    });
     seeded.push('orders');
   }
 
-  if (isEmpty('batches')) {
+  if (await isEmpty('batches')) {
     const batches = [
       ['LS2-2026-B01', 'LS2', 60, '2026-09-01', '2026-09-12', 'Stitching', 'Raj Leather Footwear'],
       ['LS3-2026-B02', 'LS3', 40, '2026-09-05', '2026-09-15', 'Cutting', 'Raj Leather Footwear'],
       ['LS1-2026-B03', 'LS1', 350, '2026-08-20', '2026-09-10', 'Packed', 'Al Noor Exports']
     ];
-    const getOrderId = q('SELECT id FROM orders WHERE customer_id = (SELECT id FROM customers WHERE name = ?) LIMIT 1');
-    const ins = q(`INSERT INTO batches (batch_code, product_id, quantity, start_date, expected_completion_date, stage, linked_order_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    const ins = `INSERT INTO batches (batch_code, product_id, quantity, start_date, expected_completion_date, stage, linked_order_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`;
     for (const b of batches) {
-      const order = getOrderId.get(b[6]);
-      ins.run(b[0], prodId(b[1]), b[2], b[3], b[4], b[5], order ? order.id : null);
+      const order = await db.get(
+        'SELECT id FROM orders WHERE customer_id = (SELECT id FROM customers WHERE name = $1) LIMIT 1',
+        [b[6]]
+      );
+      await db.run(ins, [b[0], await prodId(b[1]), b[2], b[3], b[4], b[5], order ? order.id : null]);
     }
     seeded.push('batches');
   }
 
-  if (isEmpty('stock_items')) {
+  if (await isEmpty('stock_items')) {
     const stock = [
       ['Full Grain Leather Sheet', 'Raw Material', null, null, 42, 'sheets', 20],
       ['TPR Rubber Soles', 'Raw Material', null, null, 120, 'pairs', 150],
@@ -142,30 +154,30 @@ function seed() {
       ['LS3 Leather Loafer Black Full Buckle', 'Finished Stock', 'LS3', '43', 0, 'pairs', 10],
       ['LS6 Leather Loafer Black Plain Mesh', 'Finished Stock', 'LS6', '42', 8, 'pairs', 10]
     ];
-    const ins = q(`INSERT INTO stock_items (item_name, item_type, product_id, size, quantity, unit, reorder_threshold)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    const ins = `INSERT INTO stock_items (item_name, item_type, product_id, size, quantity, unit, reorder_threshold)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`;
     for (const s of stock) {
-      const pid = s[2] ? prodId(s[2]) : null;
-      ins.run(s[0], s[1], pid, s[3], s[4], s[5], s[6]);
+      const pid = s[2] ? await prodId(s[2]) : null;
+      await db.run(ins, [s[0], s[1], pid, s[3], s[4], s[5], s[6]]);
     }
     seeded.push('stock_items');
   }
 
-  if (isEmpty('quality_checks')) {
+  if (await isEmpty('quality_checks')) {
     const checks = [
       ['LS2-2026-B01', 'Local Grade A', 'Ramesh', '2026-09-10', 'Pass', 'Stitching even, buckles aligned.'],
       ['LS3-2026-B02', 'Export Grade', 'Farhan', '2026-09-08', 'Fail', 'Minor sole misalignment, rework required.']
     ];
-    const getBatch = q('SELECT id FROM batches WHERE batch_code = ?');
-    const ins = q(`INSERT INTO quality_checks (batch_id, grade, inspector_name, inspection_date, pass_fail, notes)
-      VALUES (?, ?, ?, ?, ?, ?)`);
+    const ins = `INSERT INTO quality_checks (batch_id, grade, inspector_name, inspection_date, pass_fail, notes)
+      VALUES ($1, $2, $3, $4, $5, $6)`;
     for (const c of checks) {
-      ins.run(getBatch.get(c[0]).id, c[1], c[2], c[3], c[4], c[5]);
+      const batchId = (await db.get('SELECT id FROM batches WHERE batch_code = $1', [c[0]])).id;
+      await db.run(ins, [batchId, c[1], c[2], c[3], c[4], c[5]]);
     }
     seeded.push('quality_checks');
   }
 
-  if (isEmpty('income_expenses')) {
+  if (await isEmpty('income_expenses')) {
     const ledger = [
       ['2026-08-05', 'Expense', 'Raw Material Purchase', 120000, 'Leather sheets and soles for August production'],
       ['2026-08-18', 'Income', 'Sales Income', 125000, 'Order full payment - LS1 wholesale (Abdul Rahman Traders)'],
@@ -176,8 +188,8 @@ function seed() {
       ['2026-09-16', 'Income', 'Sales Income', 4995, 'Order payment - single pair retail (Kamal Stores)'],
       ['2026-09-17', 'Expense', 'Electricity', 12000, 'Factory electricity bill - September']
     ];
-    const ins = q('INSERT INTO income_expenses (entry_date, type, category, amount, note) VALUES (?, ?, ?, ?, ?)');
-    for (const e of ledger) ins.run(...e);
+    const ins = 'INSERT INTO income_expenses (entry_date, type, category, amount, note) VALUES ($1, $2, $3, $4, $5)';
+    for (const e of ledger) await db.run(ins, e);
     seeded.push('income_expenses');
   }
 
@@ -187,11 +199,18 @@ function seed() {
 module.exports = { seed };
 
 if (require.main === module) {
-  const seeded = seed();
-  const counts = {};
-  for (const t of ['products', 'customers', 'orders', 'order_items', 'batches', 'stock_items', 'quality_checks', 'income_expenses']) {
-    counts[t] = db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c;
-  }
-  console.log('Seeded tables:', seeded.length ? seeded.join(', ') : 'none (already populated)');
-  console.log('Row counts:', JSON.stringify(counts));
+  (async () => {
+    const seeded = await seed();
+    const counts = {};
+    for (const t of ['products', 'customers', 'orders', 'order_items', 'batches', 'stock_items', 'quality_checks', 'income_expenses']) {
+      counts[t] = (await db.get(`SELECT COUNT(*) AS c FROM ${t}`)).c;
+    }
+    console.log('Seeded tables:', seeded.length ? seeded.join(', ') : 'none (already populated)');
+    console.log('Row counts:', JSON.stringify(counts));
+    await db.pool.end();
+    process.exit(0);
+  })().catch((e) => {
+    console.error('SEED ERROR:', e.message);
+    process.exit(1);
+  });
 }

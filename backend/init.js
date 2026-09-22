@@ -1,17 +1,22 @@
 const db = require('./db');
 
+// Postgres schema — same tables and field names as the original SQLite build.
+// INTEGER PRIMARY KEY -> SERIAL PRIMARY KEY; dates stay TEXT to preserve exact
+// display/formatting behaviour (substr(entry_date, ...) etc.) exactly as before.
+// Money columns use NUMERIC so accounting values are exact (cast back to JS numbers
+// by the type parsers registered in db.js).
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS products (
-  id                INTEGER PRIMARY KEY,
+  id                SERIAL PRIMARY KEY,
   code              TEXT,
   name              TEXT,
-  price             REAL,
+  price             NUMERIC(12,2),
   sizes_available   TEXT,
   sole_type         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS customers (
-  id                INTEGER PRIMARY KEY,
+  id                SERIAL PRIMARY KEY,
   name              TEXT,
   phone             TEXT,
   location          TEXT,
@@ -19,13 +24,13 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE TABLE IF NOT EXISTS orders (
-  id                    INTEGER PRIMARY KEY,
+  id                    SERIAL PRIMARY KEY,
   customer_id           INTEGER REFERENCES customers(id),
   order_type            TEXT,
   order_date            TEXT,
   status                TEXT,
   payment_status        TEXT,
-  total_amount          REAL,
+  total_amount          NUMERIC(12,2),
   is_export             INTEGER,
   export_country        TEXT,
   shipment_date         TEXT,
@@ -34,17 +39,17 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
-  id                INTEGER PRIMARY KEY,
+  id                SERIAL PRIMARY KEY,
   order_id          INTEGER REFERENCES orders(id),
   product_id        INTEGER REFERENCES products(id),
   size              TEXT,
   quantity          INTEGER,
-  unit_price        REAL,
-  unit_cost         REAL
+  unit_price        NUMERIC(12,2),
+  unit_cost         NUMERIC(12,2)
 );
 
 CREATE TABLE IF NOT EXISTS batches (
-  id                        INTEGER PRIMARY KEY,
+  id                        SERIAL PRIMARY KEY,
   batch_code                TEXT,
   product_id                INTEGER REFERENCES products(id),
   quantity                  INTEGER,
@@ -55,7 +60,7 @@ CREATE TABLE IF NOT EXISTS batches (
 );
 
 CREATE TABLE IF NOT EXISTS stock_items (
-  id                    INTEGER PRIMARY KEY,
+  id                    SERIAL PRIMARY KEY,
   item_name             TEXT,
   item_type             TEXT,
   product_id            INTEGER REFERENCES products(id),
@@ -66,7 +71,7 @@ CREATE TABLE IF NOT EXISTS stock_items (
 );
 
 CREATE TABLE IF NOT EXISTS quality_checks (
-  id                INTEGER PRIMARY KEY,
+  id                SERIAL PRIMARY KEY,
   batch_id          INTEGER REFERENCES batches(id),
   grade             TEXT,
   inspector_name    TEXT,
@@ -76,25 +81,32 @@ CREATE TABLE IF NOT EXISTS quality_checks (
 );
 
 CREATE TABLE IF NOT EXISTS income_expenses (
-  id            INTEGER PRIMARY KEY,
+  id            SERIAL PRIMARY KEY,
   entry_date    TEXT,
   type          TEXT,
   category      TEXT,
-  amount        REAL,
+  amount        NUMERIC(12,2),
   note          TEXT
 );
 `;
 
-function init() {
-  db.exec(SCHEMA);
+async function init() {
+  await db.pool.query(SCHEMA);
 }
 
 module.exports = { init };
 
 if (require.main === module) {
-  init();
-  const tables = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-  ).all();
-  console.log('Tables created:', tables.map((t) => t.name).join(', '));
+  init()
+    .then(async () => {
+      const tables = await db.all(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
+      );
+      console.log('Tables created:', tables.map((t) => t.table_name).join(', '));
+      process.exit(0);
+    })
+    .catch((e) => {
+      console.error('INIT ERROR:', e.message);
+      process.exit(1);
+    });
 }

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 
 const STATUSES = ['Pending', 'In Production', 'Ready', 'Shipped', 'Delivered', 'Cancelled'];
@@ -34,7 +35,7 @@ export default function Orders() {
 
   const load = () => {
     setLoading(true);
-    fetch('/api/orders' + (statusFilter ? '?status=' + encodeURIComponent(statusFilter) : ''))
+    fetch(API_BASE + '/api/orders' + (statusFilter ? '?status=' + encodeURIComponent(statusFilter) : ''))
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -42,8 +43,8 @@ export default function Orders() {
   };
 
   useEffect(() => {
-    fetch('/api/customers').then((r) => r.json()).then(setCustomers).catch(() => {});
-    fetch('/api/products').then((r) => r.json()).then(setProducts).catch(() => {});
+    fetch(API_BASE + '/api/customers').then((r) => r.json()).then(setCustomers).catch(() => {});
+    fetch(API_BASE + '/api/products').then((r) => r.json()).then(setProducts).catch(() => {});
   }, []);
 
   useEffect(load, [statusFilter]);
@@ -89,7 +90,7 @@ export default function Orders() {
   const submit = (e) => {
     e.preventDefault();
     setErr('');
-    fetch(editing ? '/api/orders/' + editing : '/api/orders', {
+    fetch(API_BASE + (editing ? '/api/orders/' + editing : '/api/orders'), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildPayload())
@@ -105,7 +106,7 @@ export default function Orders() {
   };
 
   const startEdit = (o) => {
-    fetch('/api/orders/' + o.id)
+    fetch(API_BASE + '/api/orders/' + o.id)
       .then((r) => r.json())
       .then((d) => {
         setEditing(d.id);
@@ -134,7 +135,7 @@ export default function Orders() {
   };
 
   const patch = (id, path, body) => {
-    fetch('/api/orders/' + id + '/' + path, {
+    fetch(API_BASE + '/api/orders/' + id + '/' + path, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -156,12 +157,12 @@ export default function Orders() {
     }
     setOpenId(id);
     setDetail(null);
-    fetch('/api/orders/' + id).then((r) => r.json()).then(setDetail).catch(() => {});
+    fetch(API_BASE + '/api/orders/' + id).then((r) => r.json()).then(setDetail).catch(() => {});
   };
 
   const remove = (o) => {
     if (!window.confirm('Delete order #' + o.id + '?')) return;
-    fetch('/api/orders/' + o.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/orders/' + o.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

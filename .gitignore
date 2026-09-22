@@ -1,4 +1,7 @@
 node_modules/
 dist/
-database/data.db
+database/
 *.log
+.env
+.env.local
+.env.*.local

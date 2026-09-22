@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const empty = { name: '', customer_type: 'Wholesale', location: '', phone: '' };
 
@@ -10,7 +11,7 @@ export default function Customers() {
   const [err, setErr] = useState('');
 
   const load = () => {
-    fetch('/api/customers')
+    fetch(API_BASE + '/api/customers')
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -24,7 +25,7 @@ export default function Customers() {
   const submit = (e) => {
     e.preventDefault();
     setErr('');
-    fetch(editing ? '/api/customers/' + editing : '/api/customers', {
+    fetch(API_BASE + (editing ? '/api/customers/' + editing : '/api/customers'), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -52,7 +53,7 @@ export default function Customers() {
 
   const remove = (c) => {
     if (!window.confirm('Delete customer ' + c.name + '?')) return;
-    fetch('/api/customers/' + c.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/customers/' + c.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const empty = { code: '', name: '', price: '', sizes_available: '', sole_type: '' };
 
@@ -10,7 +11,7 @@ export default function Products() {
   const [err, setErr] = useState('');
 
   const load = () => {
-    fetch('/api/products')
+    fetch(API_BASE + '/api/products')
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -25,7 +26,7 @@ export default function Products() {
     e.preventDefault();
     setErr('');
     const payload = { ...form, price: Number(form.price) };
-    fetch(editing ? '/api/products/' + editing : '/api/products', {
+    fetch(API_BASE + (editing ? '/api/products/' + editing : '/api/products'), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -54,7 +55,7 @@ export default function Products() {
 
   const remove = (p) => {
     if (!window.confirm('Delete ' + p.code + '?')) return;
-    fetch('/api/products/' + p.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/products/' + p.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

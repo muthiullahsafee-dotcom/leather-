@@ -2,28 +2,29 @@ const express = require('express');
 const db = require('../db');
 
 const router = express.Router();
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const VALID_TYPES = ['Wholesale', 'Retail', 'Export'];
 
-router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT * FROM customers ORDER BY name').all();
+router.get('/', wrap(async (req, res) => {
+  const rows = await db.all('SELECT * FROM customers ORDER BY name');
   res.json(rows);
-});
+}));
 
-router.get('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+router.get('/:id', wrap(async (req, res) => {
+  const row = await db.get('SELECT * FROM customers WHERE id = $1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Customer not found' });
   res.json(row);
-});
+}));
 
-router.get('/:id/orders', (req, res) => {
-  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+router.get('/:id/orders', wrap(async (req, res) => {
+  const customer = await db.get('SELECT * FROM customers WHERE id = $1', [req.params.id]);
   if (!customer) return res.status(404).json({ error: 'Customer not found' });
-  const orders = db.prepare('SELECT * FROM orders WHERE customer_id = ? ORDER BY order_date DESC').all(req.params.id);
+  const orders = await db.all('SELECT * FROM orders WHERE customer_id = $1 ORDER BY order_date DESC', [req.params.id]);
   res.json({ customer, orders });
-});
+}));
 
-router.post('/', (req, res) => {
+router.post('/', wrap(async (req, res) => {
   const { name, phone, location, customer_type } = req.body || {};
   if (!name || !customer_type) {
     return res.status(400).json({ error: 'name and customer_type are required' });
@@ -31,14 +32,15 @@ router.post('/', (req, res) => {
   if (!VALID_TYPES.includes(customer_type)) {
     return res.status(400).json({ error: `customer_type must be one of ${VALID_TYPES.join(', ')}` });
   }
-  const info = db
-    .prepare('INSERT INTO customers (name, phone, location, customer_type) VALUES (?, ?, ?, ?)')
-    .run(name, phone || null, location || null, customer_type);
-  res.status(201).json(db.prepare('SELECT * FROM customers WHERE id = ?').get(info.lastInsertRowid));
-});
+  const info = await db.run(
+    'INSERT INTO customers (name, phone, location, customer_type) VALUES ($1, $2, $3, $4) RETURNING id',
+    [name, phone || null, location || null, customer_type]
+  );
+  res.status(201).json(await db.get('SELECT * FROM customers WHERE id = $1', [info.lastId]));
+}));
 
-router.put('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+router.put('/:id', wrap(async (req, res) => {
+  const existing = await db.get('SELECT * FROM customers WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
   const { name, phone, location, customer_type } = req.body || {};
@@ -52,22 +54,24 @@ router.put('/:id', (req, res) => {
   if (!VALID_TYPES.includes(next.customer_type)) {
     return res.status(400).json({ error: `customer_type must be one of ${VALID_TYPES.join(', ')}` });
   }
-  db.prepare('UPDATE customers SET name = ?, phone = ?, location = ?, customer_type = ? WHERE id = ?')
-    .run(next.name, next.phone, next.location, next.customer_type, existing.id);
-  res.json(db.prepare('SELECT * FROM customers WHERE id = ?').get(existing.id));
-});
+  await db.run(
+    'UPDATE customers SET name = $1, phone = $2, location = $3, customer_type = $4 WHERE id = $5',
+    [next.name, next.phone, next.location, next.customer_type, existing.id]
+  );
+  res.json(await db.get('SELECT * FROM customers WHERE id = $1', [existing.id]));
+}));
 
-router.delete('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+router.delete('/:id', wrap(async (req, res) => {
+  const existing = await db.get('SELECT * FROM customers WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Customer not found' });
   // ASSUMPTION-NEEDED: Deleting a customer who has orders would orphan those orders,
   // so the demo blocks it. The real build will decide between "block" or "soft archive".
-  const count = db.prepare('SELECT COUNT(*) AS c FROM orders WHERE customer_id = ?').get(req.params.id).c;
+  const count = (await db.get('SELECT COUNT(*) AS c FROM orders WHERE customer_id = $1', [req.params.id])).c;
   if (count > 0) {
     return res.status(400).json({ error: `Cannot delete: this customer has ${count} order(s). Delete or reassign the orders first.` });
   }
-  db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
+  await db.run('DELETE FROM customers WHERE id = $1', [req.params.id]);
   res.json({ deleted: true, id: Number(req.params.id) });
-});
+}));
 
 module.exports = router;

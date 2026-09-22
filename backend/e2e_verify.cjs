@@ -5,8 +5,6 @@ const fs = require('fs');
 const db = require('./db');
 const { init } = require('./init');
 
-init();
-
 const app = express();
 app.use(express.json());
 
@@ -59,6 +57,7 @@ function api(base, method, p, body) {
 }
 
 async function main() {
+  await init();
   const server = app.listen(0);
   const base = 'http://localhost:' + server.address().port;
   const created = { customerId: null, orderId: null, batchId: null, qcId: null, ledgerId: null };
@@ -131,7 +130,7 @@ async function main() {
 
   server.closeAllConnections();
   await new Promise((r) => server.close(r));
-  db.close();
+  await db.pool.end();
   await new Promise((r) => setTimeout(r, 100));
   console.log('=== E2E RESULT: ' + passed + ' passed, ' + failed + ' failed ===');
   process.exit(failed ? 1 : 0);
@@ -139,6 +138,6 @@ async function main() {
 
 main().catch((e) => {
   console.error('E2E HARNESS ERROR: ' + e.message);
-  try { db.close(); } catch (x) {}
+  try { db.pool.end(); } catch (x) {}
   process.exit(2);
 });

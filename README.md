@@ -3,10 +3,12 @@
 A local demo web app for **Leather Stylish**, a leather-footwear manufacturer in Ambur,
 Tamil Nadu. It covers the day-to-day operations of the business — products, stock,
 customers, orders (including export shipments), production batches, quality checks,
-income/expenses and reports — behind a responsive React UI and a small Express + SQLite API.
+income/expenses and reports — behind a responsive React UI, a small Express API and a
+hosted PostgreSQL (Supabase) database.
 
-This is a **demo**, not a production system: it runs entirely on your machine, has no
-authentication, and uses a seeded SQLite database.
+This is a **demo**, not a production system: it has no authentication and uses seeded
+sample data, but it is wired up to be deployed — the backend runs on Render and the
+database on Supabase.
 
 ---
 
@@ -17,7 +19,7 @@ authentication, and uses a seeded SQLite database.
 | Frontend  | React 18 (functional components + hooks), Vite 6   |
 | Charts    | Recharts 2                                         |
 | Backend   | Node.js + Express 4                                |
-| Database  | SQLite via better-sqlite3                          |
+| Database  | PostgreSQL via `pg` (Supabase / Render-managed DB)  |
 | Styling   | Plain CSS (responsive, no UI framework)            |
 
 ---
@@ -28,14 +30,14 @@ authentication, and uses a seeded SQLite database.
 lether campany/
 ├─ backend/
 │  ├─ server.js              # Express app, mounts all routes, listens on 3001
-│  ├─ db.js                  # SQLite connection (WAL, foreign_keys ON)
+│  ├─ db.js                  # PostgreSQL pool (pg) + run/all/get/tx helpers
 │  ├─ init.js                # creates the 8 tables
 │  ├─ seed.js                # inserts sample data
 │  ├─ verify.js              # checks the schema columns
 │  ├─ check_seed.cjs         # checks seeded row counts + integrity
 │  ├─ route_verify.cjs       # in-process checks for all 8 route modules
 │  ├─ e2e_verify.cjs         # end-to-end flow check (serves frontend + API)
-│  ├─ database/data.db       # SQLite database file (created on first run)
+│  ├─ .env.example           # template for DATABASE_URL and PG_SSL
 │  └─ routes/
 │     ├─ products.js  ├─ stock.js      ├─ customers.js  ├─ orders.js
 │     ├─ batches.js   ├─ quality.js    ├─ ledger.js      └─ reports.js
@@ -56,28 +58,35 @@ Prerequisites: **Node.js 18+** (developed on Node 24) and npm.
 
 ### 1. Backend
 
+The database is hosted (PostgreSQL on Supabase, or a managed Postgres on Render). Point
+the backend at it before starting:
+
 ```
 cd backend
 npm install
-npm run seed        # (re)create tables and load sample data (idempotent)
-npm start           # http://localhost:3001
+copy .env.example .env       # then edit .env with your real DATABASE_URL
+npm run seed                 # create tables and load sample data (idempotent)
+npm run dev                  # http://localhost:3001
 ```
 
-`npm start` runs `node server.js`. It creates `database/data.db` and the tables if they
-do not exist. `npm run seed` loads the sample data and is safe to re-run.
+`DATABASE_URL` is read from `.env` (or the process environment). `npm run seed` applies
+the schema if needed and loads the sample data; it is safe to re-run. Set `PG_SSL=false`
+only for a Postgres that does not use TLS.
 
 ### 2. Frontend
 
 ```
 cd frontend
 npm install
-npm run dev         # http://localhost:5173
+copy .env.example .env       # optional; leave VITE_API_URL empty during local dev
+npm run dev                  # http://localhost:5173
 ```
 
 Open **http://localhost:5173**. The Vite dev server proxies all `/api/*` calls to the
 backend on port 3001, so both must be running.
 
-To produce a static build: `npm run build` (output in `frontend/dist`).
+To produce a static build: `npm run build` (output in `frontend/dist`). When deploying,
+set `VITE_API_URL` to the live backend URL before building so the bundle calls it directly.
 
 ---
 
@@ -243,7 +252,21 @@ From `frontend/`:
 npm run build           # production bundle
 ```
 
-All of the above currently pass.
+All of the above currently pass. Each backend check needs the backend env (`DATABASE_URL`)
+set, e.g. via `$env:DATABASE_URL` on Windows PowerShell or a `.env` + `--env-file-if-exists`.
+
+---
+
+## Deployment (Render + Supabase)
+
+- **Database** — create a Supabase project, grab its pooler/project connection string and
+  set it as the backend's `DATABASE_URL`. Run `npm run seed` once against that database.
+- **Backend** — a Render Web Service: build command `npm install`, start command
+  `npm start`, env var `DATABASE_URL`. It listens on `PORT` (Render injects it).
+- **Frontend** — a Render Static Site: build command `npm install && npm run build`,
+  publish directory `dist`, plus the `VITE_API_URL` env var pointing at the backend URL.
+  Add an `api` rewrite/redirect so `/api/*` hits the backend (or serve the SPA from the
+  backend itself).
 
 ---
 
@@ -251,7 +274,8 @@ All of the above currently pass.
 
 - **No authentication or user roles** — it is a single-user local demo. Server-side auth
   and permissions are the next thing to add for real use.
-- **No cloud services, no paid APIs, no external calls.** Data stays in the local SQLite file.
+- **No cloud services, no paid APIs, no external calls** besides the hosted Postgres
+  database itself. Data lives in the configured database (Supabase by default).
 - Currency is shown in Indian Rupees (₹) with `en-IN` formatting.
 - `recharts` 2.x prints an upstream deprecation notice on install suggesting v3; this demo
   intentionally stays on the 2.x line.

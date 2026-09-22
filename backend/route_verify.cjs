@@ -5,8 +5,6 @@ const path = require('path');
 const db = require('./db');
 const { init } = require('./init');
 
-init();
-
 const app = express();
 app.use(express.json());
 
@@ -65,6 +63,7 @@ function api(base, method, p, body) {
 }
 
 async function main() {
+  await init();
   const server = app.listen(0);
   const base = 'http://localhost:' + server.address().port;
 
@@ -118,7 +117,7 @@ async function main() {
 
   a = await api(base, 'PATCH', '/api/orders/2/status', { status: 'Delivered' });
   check('PATCH order status via orders route', a.status === 200 && a.json.status === 'Delivered', a.json);
-  db.prepare("UPDATE orders SET status = 'Shipped' WHERE id = 2").run();
+  await db.run("UPDATE orders SET status = 'Shipped' WHERE id = 2");
 
   a = await api(base, 'GET', '/api/quality-checks');
   check('GET quality checks -> 200 with 2 rows', a.status === 200 && a.json.length === 2, a);
@@ -155,15 +154,15 @@ async function main() {
 
   a = await api(base, 'GET', '/api/reports/salary-this-month');
   const curMonth = new Date().toISOString().slice(0, 7);
-  const expectedSalary = db.prepare("SELECT COALESCE(SUM(amount),0) AS t FROM income_expenses WHERE type='Expense' AND lower(COALESCE(category,'')) LIKE '%salary%' AND substr(entry_date,1,7)=?").get(curMonth).t;
+  const expectedSalary = (await db.get("SELECT COALESCE(SUM(amount),0) AS t FROM income_expenses WHERE type='Expense' AND lower(COALESCE(category,'')) LIKE '%salary%' AND substr(entry_date,1,7)=$1", [curMonth])).t;
   check('salary-this-month matches ledger sum for current month', a.status === 200 && a.json.month === curMonth && a.json.total === expectedSalary, a.json);
 
   // cleanup test-created batch
-  db.prepare('DELETE FROM batches WHERE id = ?').run(newBatchId);
+  await db.run('DELETE FROM batches WHERE id = $1', [newBatchId]);
 
   server.closeAllConnections();
   await new Promise((r) => server.close(r));
-  db.close();
+  await db.pool.end();
   await new Promise((r) => setTimeout(r, 100));
   console.log('=== RESULT: ' + passed + ' passed, ' + failed + ' failed ===');
   process.exit(failed ? 1 : 0);
@@ -171,6 +170,6 @@ async function main() {
 
 main().catch((e) => {
   console.error('HARNESS ERROR: ' + e.message);
-  try { db.close(); } catch (x) {}
+  try { db.pool.end(); } catch (x) {}
   process.exit(2);
 });

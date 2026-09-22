@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const empty = { item_name: '', item_type: 'Raw Material', product_id: '', size: '', quantity: '', unit: '', reorder_threshold: '' };
 
@@ -12,7 +13,7 @@ export default function Stock() {
   const [err, setErr] = useState('');
 
   const load = () => {
-    fetch('/api/stock' + (lowOnly ? '?low=1' : ''))
+    fetch(API_BASE + '/api/stock' + (lowOnly ? '?low=1' : ''))
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -20,7 +21,7 @@ export default function Stock() {
   };
 
   useEffect(() => {
-    fetch('/api/products')
+    fetch(API_BASE + '/api/products')
       .then((r) => r.json())
       .then(setProducts)
       .catch(() => {});
@@ -42,7 +43,7 @@ export default function Stock() {
       unit: form.unit || null,
       reorder_threshold: Number(form.reorder_threshold)
     };
-    fetch(editing ? '/api/stock/' + editing : '/api/stock', {
+    fetch(API_BASE + (editing ? '/api/stock/' + editing : '/api/stock'), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -73,7 +74,7 @@ export default function Stock() {
 
   const remove = (s) => {
     if (!window.confirm('Delete stock item ' + s.item_name + '?')) return;
-    fetch('/api/stock/' + s.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/stock/' + s.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

@@ -2,10 +2,9 @@ const express = require('express');
 const db = require('../db');
 
 const router = express.Router();
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const GRADES = ['Export Grade', 'Local Grade A', 'Local Grade B'];
-
-const findBatch = db.prepare('SELECT * FROM batches WHERE id = ?');
 
 const SELECT = `
   SELECT q.*, b.batch_code, p.code AS product_code, p.name AS product_name
@@ -14,50 +13,49 @@ const SELECT = `
   LEFT JOIN products p ON b.product_id = p.id
 `;
 
-router.get('/', (req, res) => {
+router.get('/', wrap(async (req, res) => {
   const { grade, result } = req.query || {};
-  let rows;
   if (grade || result) {
     const clauses = [];
     const params = [];
-    if (grade) { clauses.push('q.grade = ?'); params.push(grade); }
-    if (result) { clauses.push('q.pass_fail = ?'); params.push(result); }
-    rows = db.prepare(SELECT + ' WHERE ' + clauses.join(' AND ') + ' ORDER BY q.id').all(...params);
+    if (grade) { clauses.push('q.grade = $' + (params.length + 1)); params.push(grade); }
+    if (result) { clauses.push('q.pass_fail = $' + (params.length + 1)); params.push(result); }
+    res.json(await db.all(SELECT + ' WHERE ' + clauses.join(' AND ') + ' ORDER BY q.id', params));
   } else {
-    rows = db.prepare(SELECT + ' ORDER BY q.id').all();
+    res.json(await db.all(SELECT + ' ORDER BY q.id'));
   }
-  res.json(rows);
-});
+}));
 
-router.get('/:id', (req, res) => {
-  const row = db.prepare(SELECT + ' WHERE q.id = ?').get(req.params.id);
+router.get('/:id', wrap(async (req, res) => {
+  const row = await db.get(SELECT + ' WHERE q.id = $1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Quality check not found' });
   res.json(row);
-});
+}));
 
-router.post('/', (req, res) => {
+router.post('/', wrap(async (req, res) => {
   const { batch_id, grade, inspector_name, inspection_date, pass_fail, notes } = req.body || {};
   if (!batch_id || !grade || !inspector_name || !inspection_date) {
     return res.status(400).json({ error: 'batch_id, grade, inspector_name and inspection_date are required' });
   }
-  const batch = findBatch.get(batch_id);
+  const batch = await db.get('SELECT * FROM batches WHERE id = $1', [batch_id]);
   if (!batch) return res.status(400).json({ error: 'batch_id does not exist' });
   if (!GRADES.includes(grade)) return res.status(400).json({ error: `grade must be one of ${GRADES.join(', ')}` });
   const pass = pass_fail === undefined ? 'Pass' : pass_fail;
   if (pass !== 'Pass' && pass !== 'Fail') return res.status(400).json({ error: "pass_fail must be 'Pass' or 'Fail'" });
 
-  const info = db.prepare(`
+  const info = await db.run(`
     INSERT INTO quality_checks (batch_id, grade, inspector_name, inspection_date, pass_fail, notes)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(batch_id, grade, inspector_name, inspection_date, pass, notes || null);
-  res.status(201).json(db.prepare(SELECT + ' WHERE q.id = ?').get(info.lastInsertRowid));
-});
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING id
+  `, [batch_id, grade, inspector_name, inspection_date, pass, notes || null]);
+  res.status(201).json(await db.get(SELECT + ' WHERE q.id = $1', [info.lastId]));
+}));
 
-router.delete('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM quality_checks WHERE id = ?').get(req.params.id);
+router.delete('/:id', wrap(async (req, res) => {
+  const row = await db.get('SELECT * FROM quality_checks WHERE id = $1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Quality check not found' });
-  db.prepare('DELETE FROM quality_checks WHERE id = ?').run(row.id);
+  await db.run('DELETE FROM quality_checks WHERE id = $1', [row.id]);
   res.json({ deleted: true, id: row.id });
-});
+}));
 
 module.exports = router;

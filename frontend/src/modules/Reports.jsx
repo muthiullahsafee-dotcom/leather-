@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 import {
   ResponsiveContainer,
   LineChart,
@@ -25,10 +26,10 @@ export default function Reports() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/reports/sales-over-time').then((r) => r.json()),
-      fetch('/api/reports/profit-by-month').then((r) => r.json()),
-      fetch('/api/reports/stock-by-style').then((r) => r.json()),
-      fetch('/api/reports/orders-by-status').then((r) => r.json())
+      fetch(API_BASE + '/api/reports/sales-over-time').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/profit-by-month').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/stock-by-style').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/orders-by-status').then((r) => r.json())
     ])
       .then(([s, p, st, os]) => {
         setSales(s);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -30,10 +31,10 @@ export default function Dashboard() {
   useEffect(() => {
     let alive = true;
     Promise.all([
-      fetch('/api/orders').then((r) => r.json()),
-      fetch('/api/stock').then((r) => r.json()),
-      fetch('/api/reports/income-expense-by-month').then((r) => r.json()),
-      fetch('/api/reports/salary-this-month').then((r) => r.json())
+      fetch(API_BASE + '/api/orders').then((r) => r.json()),
+      fetch(API_BASE + '/api/stock').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/income-expense-by-month').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/salary-this-month').then((r) => r.json())
     ])
       .then(([o, s, c, sal]) => {
         if (!alive) return;

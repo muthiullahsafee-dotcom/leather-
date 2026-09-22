@@ -2,31 +2,33 @@ const express = require('express');
 const db = require('../db');
 
 const router = express.Router();
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 function withLowFlag(row) {
   return { ...row, low_stock: row.quantity < row.reorder_threshold ? 1 : 0 };
 }
 
-function listRows(onlyLow) {
-  const rows = db.prepare(`
+async function listRows(onlyLow) {
+  const rows = await db.all(`
     SELECT s.*, p.code AS product_code, p.name AS product_name
     FROM stock_items s LEFT JOIN products p ON s.product_id = p.id
     ORDER BY s.item_type, s.id
-  `).all().map(withLowFlag);
-  return onlyLow ? rows.filter((r) => r.low_stock === 1) : rows;
+  `);
+  const flagged = rows.map(withLowFlag);
+  return onlyLow ? flagged.filter((r) => r.low_stock === 1) : flagged;
 }
 
-router.get('/', (req, res) => {
-  res.json(listRows(req.query.low === '1' || req.query.low === 'true'));
-});
+router.get('/', wrap(async (req, res) => {
+  res.json(await listRows(req.query.low === '1' || req.query.low === 'true'));
+}));
 
-router.get('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(req.params.id);
+router.get('/:id', wrap(async (req, res) => {
+  const row = await db.get('SELECT * FROM stock_items WHERE id = $1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Stock item not found' });
   res.json(withLowFlag(row));
-});
+}));
 
-router.post('/', (req, res) => {
+router.post('/', wrap(async (req, res) => {
   const { item_name, item_type, product_id, size, quantity, unit, reorder_threshold } = req.body || {};
   if (!item_name || !item_type || quantity === undefined || quantity === null) {
     return res.status(400).json({ error: 'item_name, item_type and quantity are required' });
@@ -37,16 +39,17 @@ router.post('/', (req, res) => {
   if (item_type === 'Raw Material' && product_id) {
     return res.status(400).json({ error: 'Raw Material should not have a product_id' });
   }
-  const info = db
-    .prepare(`INSERT INTO stock_items (item_name, item_type, product_id, size, quantity, unit, reorder_threshold)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(item_name, item_type, product_id || null, size || null, quantity, unit || null, reorder_threshold !== undefined ? reorder_threshold : 0);
-  const row = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(info.lastInsertRowid);
+  const info = await db.run(
+    `INSERT INTO stock_items (item_name, item_type, product_id, size, quantity, unit, reorder_threshold)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [item_name, item_type, product_id || null, size || null, quantity, unit || null, reorder_threshold !== undefined ? reorder_threshold : 0]
+  );
+  const row = await db.get('SELECT * FROM stock_items WHERE id = $1', [info.lastId]);
   res.status(201).json(withLowFlag(row));
-});
+}));
 
-router.put('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(req.params.id);
+router.put('/:id', wrap(async (req, res) => {
+  const existing = await db.get('SELECT * FROM stock_items WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Stock item not found' });
 
   const { item_name, item_type, product_id, size, quantity, unit, reorder_threshold } = req.body || {};
@@ -65,18 +68,20 @@ router.put('/:id', (req, res) => {
   if (next.item_type === 'Raw Material' && next.product_id) {
     return res.status(400).json({ error: 'Raw Material should not have a product_id' });
   }
-  db.prepare(`UPDATE stock_items SET item_name = ?, item_type = ?, product_id = ?, size = ?, quantity = ?, unit = ?, reorder_threshold = ?
-              WHERE id = ?`)
-    .run(next.item_name, next.item_type, next.product_id, next.size, next.quantity, next.unit, next.reorder_threshold, existing.id);
-  const row = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(existing.id);
+  await db.run(
+    `UPDATE stock_items SET item_name = $1, item_type = $2, product_id = $3, size = $4, quantity = $5, unit = $6, reorder_threshold = $7
+     WHERE id = $8`,
+    [next.item_name, next.item_type, next.product_id, next.size, next.quantity, next.unit, next.reorder_threshold, existing.id]
+  );
+  const row = await db.get('SELECT * FROM stock_items WHERE id = $1', [existing.id]);
   res.json(withLowFlag(row));
-});
+}));
 
-router.delete('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(req.params.id);
+router.delete('/:id', wrap(async (req, res) => {
+  const row = await db.get('SELECT * FROM stock_items WHERE id = $1', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Stock item not found' });
-  db.prepare('DELETE FROM stock_items WHERE id = ?').run(row.id);
+  await db.run('DELETE FROM stock_items WHERE id = $1', [row.id]);
   res.json({ deleted: true, id: row.id });
-});
+}));
 
 module.exports = router;

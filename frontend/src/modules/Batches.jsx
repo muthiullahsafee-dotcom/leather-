@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const STAGES = ['Cutting', 'Stitching', 'Finishing', 'Quality Check', 'Packed'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -16,7 +17,7 @@ export default function Batches() {
 
   const load = () => {
     setLoading(true);
-    fetch('/api/batches' + (stageFilter ? '?stage=' + encodeURIComponent(stageFilter) : ''))
+    fetch(API_BASE + '/api/batches' + (stageFilter ? '?stage=' + encodeURIComponent(stageFilter) : ''))
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -24,8 +25,8 @@ export default function Batches() {
   };
 
   useEffect(() => {
-    fetch('/api/products').then((r) => r.json()).then(setProducts).catch(() => {});
-    fetch('/api/orders').then((r) => r.json()).then(setOrders).catch(() => {});
+    fetch(API_BASE + '/api/products').then((r) => r.json()).then(setProducts).catch(() => {});
+    fetch(API_BASE + '/api/orders').then((r) => r.json()).then(setOrders).catch(() => {});
   }, []);
 
   useEffect(load, [stageFilter]);
@@ -44,7 +45,7 @@ export default function Batches() {
       stage: form.stage,
       linked_order_id: form.linked_order_id ? Number(form.linked_order_id) : null
     };
-    const url = editing ? '/api/batches/' + editing : '/api/batches';
+    const url = API_BASE + '/api/batches' + (editing ? '/' + editing : '');
     const method = editing ? 'PUT' : 'POST';
     if (editing) {
       delete payload.product_id;
@@ -82,7 +83,7 @@ export default function Batches() {
   };
 
   const advance = (b) => {
-    fetch('/api/batches/' + b.id + '/advance', { method: 'POST' })
+    fetch(API_BASE + '/api/batches/' + b.id + '/advance', { method: 'POST' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Advance failed');
@@ -93,7 +94,7 @@ export default function Batches() {
 
   const remove = (b) => {
     if (!window.confirm('Delete batch ' + b.batch_code + '?')) return;
-    fetch('/api/batches/' + b.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/batches/' + b.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

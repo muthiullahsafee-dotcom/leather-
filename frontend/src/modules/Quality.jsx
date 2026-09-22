@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const GRADES = ['Export Grade', 'Local Grade A', 'Local Grade B'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -14,7 +15,7 @@ export default function Quality() {
 
   const load = () => {
     setLoading(true);
-    fetch('/api/quality-checks' + (gradeFilter ? '?grade=' + encodeURIComponent(gradeFilter) : ''))
+    fetch(API_BASE + '/api/quality-checks' + (gradeFilter ? '?grade=' + encodeURIComponent(gradeFilter) : ''))
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -22,7 +23,7 @@ export default function Quality() {
   };
 
   useEffect(() => {
-    fetch('/api/batches').then((r) => r.json()).then(setBatches).catch(() => {});
+    fetch(API_BASE + '/api/batches').then((r) => r.json()).then(setBatches).catch(() => {});
   }, []);
 
   useEffect(load, [gradeFilter]);
@@ -32,7 +33,7 @@ export default function Quality() {
   const submit = (e) => {
     e.preventDefault();
     setErr('');
-    fetch('/api/quality-checks', {
+    fetch(API_BASE + '/api/quality-checks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...form, batch_id: Number(form.batch_id) })
@@ -48,7 +49,7 @@ export default function Quality() {
 
   const remove = (q) => {
     if (!window.confirm('Delete this quality check?')) return;
-    fetch('/api/quality-checks/' + q.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/quality-checks/' + q.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

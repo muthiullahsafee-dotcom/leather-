@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../api.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const empty = { entry_date: today(), type: 'Income', category: '', amount: '', note: '' };
@@ -11,7 +12,7 @@ export default function Ledger() {
   const [err, setErr] = useState('');
 
   const load = () => {
-    fetch('/api/income-expenses')
+    fetch(API_BASE + '/api/income-expenses')
       .then((r) => r.json())
       .then(setRows)
       .catch(() => {})
@@ -26,7 +27,7 @@ export default function Ledger() {
     e.preventDefault();
     setErr('');
     const payload = { ...form, amount: Number(form.amount) };
-    fetch(editing ? '/api/income-expenses/' + editing : '/api/income-expenses', {
+    fetch(API_BASE + (editing ? '/api/income-expenses/' + editing : '/api/income-expenses'), {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -55,7 +56,7 @@ export default function Ledger() {
 
   const remove = (x) => {
     if (!window.confirm('Delete this entry?')) return;
-    fetch('/api/income-expenses/' + x.id, { method: 'DELETE' })
+    fetch(API_BASE + '/api/income-expenses/' + x.id, { method: 'DELETE' })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Delete failed');

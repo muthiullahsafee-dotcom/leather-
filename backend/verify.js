@@ -11,33 +11,44 @@ const expected = {
   income_expenses: ['id', 'entry_date', 'type', 'category', 'amount', 'note']
 };
 
-let ok = true;
-const tables = db.prepare(
-  "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-).all();
+async function main() {
+  let ok = true;
+  const tables = await db.all(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
+  );
+  const tableSet = tables.map((t) => t.table_name);
 
-for (const t of tables) {
-  const cols = db.prepare(`PRAGMA table_info(${t.name})`).all().map((c) => c.name);
-  const exp = expected[t.name];
-  if (!exp) {
-    console.log(`UNEXPECTED TABLE: ${t.name}`);
-    ok = false;
-    continue;
+  for (const t of tableSet) {
+    const cols = await db.all(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
+      [t]
+    );
+    const colNames = cols.map((c) => c.column_name);
+    const exp = expected[t];
+    if (!exp) {
+      console.log(`UNEXPECTED TABLE: ${t}`);
+      ok = false;
+      continue;
+    }
+    const missing = exp.filter((c) => !colNames.includes(c));
+    const extra = colNames.filter((c) => !exp.includes(c));
+    const match = missing.length === 0 && extra.length === 0;
+    if (!match) ok = false;
+    console.log(`${t}: ${match ? 'OK' : 'MISMATCH'} (${colNames.join(', ')})${missing.length ? ' MISSING: ' + missing.join(',') : ''}${extra.length ? ' EXTRA: ' + extra.join(',') : ''}`);
   }
-  const missing = exp.filter((c) => !cols.includes(c));
-  const extra = cols.filter((c) => !exp.includes(c));
-  const match = missing.length === 0 && extra.length === 0;
-  if (!match) ok = false;
-  console.log(`${t.name}: ${match ? 'OK' : 'MISMATCH'} (${cols.join(', ')})${missing.length ? ' MISSING: ' + missing.join(',') : ''}${extra.length ? ' EXTRA: ' + extra.join(',') : ''}`);
+
+  for (const t in expected) {
+    if (!tableSet.includes(t)) {
+      console.log(`MISSING TABLE: ${t}`);
+      ok = false;
+    }
+  }
+
+  console.log(ok ? 'SCHEMA VERIFIED: all 8 tables match Section 6 exactly.' : 'SCHEMA PROBLEMS FOUND.');
+  process.exit(ok ? 0 : 1);
 }
 
-const tableSet = tables.map((t) => t.name);
-for (const t in expected) {
-  if (!tableSet.includes(t)) {
-    console.log(`MISSING TABLE: ${t}`);
-    ok = false;
-  }
-}
-
-console.log(ok ? 'SCHEMA VERIFIED: all 8 tables match Section 6 exactly.' : 'SCHEMA PROBLEMS FOUND.');
-process.exit(ok ? 0 : 1);
+main().catch((e) => {
+  console.error('VERIFY ERROR:', e.message);
+  process.exit(2);
+});
