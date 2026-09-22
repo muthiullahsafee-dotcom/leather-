@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE } from '../api.js';
+import { API_BASE, unwrapArray } from '../api.js';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -33,14 +33,14 @@ export default function Dashboard() {
     Promise.all([
       fetch(API_BASE + '/api/orders').then((r) => r.json()),
       fetch(API_BASE + '/api/stock').then((r) => r.json()),
-      fetch(API_BASE + '/api/reports/income-expense-by-month').then((r) => r.json()),
+      fetch(API_BASE + '/api/reports/income-expense-by-month').then((r) => r.json()).then(unwrapArray),
       fetch(API_BASE + '/api/reports/salary-this-month').then((r) => r.json())
     ])
       .then(([o, s, c, sal]) => {
         if (!alive) return;
         setOrders(o);
         setStock(s);
-        setCashflow(Array.isArray(c) ? c.map((row) => ({ ...row, label: monthLabel(row.month) })) : []);
+        setCashflow(c.map((row) => ({ ...row, label: monthLabel(row.month) })));
         setSalary(sal || { month: '', total: 0 });
       })
       .catch(() => {})
