@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE, unwrapArray } from '../api.js';
 import {
-  ResponsiveContainer,
   ComposedChart,
   Bar,
   Line,
@@ -12,6 +11,7 @@ import {
   Legend
 } from 'recharts';
 import { PALETTE, inr } from '../palette.js';
+import ResponsiveChart from '../ResponsiveChart.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthLabel = (month) => {
@@ -86,18 +86,20 @@ export default function Dashboard() {
         <p className="chart-caption">Income, expenses and profit from the cash ledger — last 6 months.</p>
         {/* ASSUMPTION-NEEDED: spec allowed "line or bar"; used ComposedChart — bars for
             income/expenses plus a profit line — so both readings are satisfied. */}
-        <ResponsiveContainer width="100%" height={320}>
-          <ComposedChart data={cashflow} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={PALETTE.muted} opacity={0.35} />
-            <XAxis dataKey="label" />
-            <YAxis />
-            <Tooltip formatter={(v) => inr(v)} />
-            <Legend />
-            <Bar dataKey="income" name="Income" fill={PALETTE.positive} radius={[3, 3, 0, 0]} />
-            <Bar dataKey="expenses" name="Expenses" fill={PALETTE.alert} radius={[3, 3, 0, 0]} />
-            <Line dataKey="profit" name="Profit" stroke={PALETTE.accent} strokeWidth={2} dot={{ r: 4, fill: PALETTE.accent }} />
-          </ComposedChart>
-        </ResponsiveContainer>
+        <ResponsiveChart height={320}>
+          {(dims) => (
+            <ComposedChart {...dims} data={cashflow} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={PALETTE.muted} opacity={0.35} />
+              <XAxis dataKey="label" />
+              <YAxis />
+              <Tooltip formatter={(v) => inr(v)} />
+              <Legend />
+              <Bar dataKey="income" name="Income" fill={PALETTE.positive} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="expenses" name="Expenses" fill={PALETTE.alert} radius={[3, 3, 0, 0]} />
+              <Line dataKey="profit" name="Profit" stroke={PALETTE.accent} strokeWidth={2} dot={{ r: 4, fill: PALETTE.accent }} />
+            </ComposedChart>
+          )}
+        </ResponsiveChart>
       </div>
 
       <div className="cards dashboard-tiles">
