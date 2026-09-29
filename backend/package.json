@@ -1,12 +1,13 @@
 {
-  "name": "leather-stylish-backend",
+  "name": "surya-tech-backend",
   "version": "1.0.0",
-  "description": "Backend API for the Leather Stylish demo business management app",
+  "description": "Backend API for the Surya Tech demo business management app",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --env-file-if-exists=.env server.js",
     "seed": "node seed.js",
+    "reset": "node reset.js",
     "verify": "node route_verify.cjs"
   },
   "dependencies": {

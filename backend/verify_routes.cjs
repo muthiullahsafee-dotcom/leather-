@@ -1,89 +1,147 @@
-const BASE = 'http://localhost:3001';
-let pass = 0;
-let fail = 0;
-const check = (name, cond, extra) => {
+// Live-server smoke test for the Surya Tech API.
+//
+// `route_verify.cjs` mounts the routes in-process; this one talks to a server that is
+// actually running, which is what the demo does. It only issues GET requests, so it
+// can be run against a running demo without changing any data.
+//
+// Usage:  node verify_routes.cjs [baseUrl]     (default http://localhost:3001)
+
+const http = require('http');
+const { URL } = require('url');
+
+const BASE = process.argv[2] || process.env.API_URL || 'http://localhost:3001';
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function check(name, cond, extra) {
   if (cond) {
-    pass += 1;
+    passed += 1;
     console.log('PASS  ' + name);
   } else {
-    fail += 1;
+    failed += 1;
+    failures.push(name);
     console.log('FAIL  ' + name + (extra === undefined ? '' : ' :: ' + JSON.stringify(extra)));
   }
-};
-const api = async (method, p, body) => {
-  const opt = { method, headers: {} };
-  if (body !== undefined) {
-    opt.headers['Content-Type'] = 'application/json';
-    opt.body = JSON.stringify(body);
+}
+
+function get(path) {
+  return new Promise((resolve) => {
+    const u = new URL(path, BASE);
+    const req = http.request(u, { method: 'GET' }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(data); } catch (e) { json = null; }
+        resolve({ status: res.statusCode, json, raw: data });
+      });
+    });
+    req.on('error', (e) => resolve({ status: 0, json: null, error: e.message }));
+    req.setTimeout(15000, () => { req.destroy(); resolve({ status: 0, json: null, error: 'timeout' }); });
+    req.end();
+  });
+}
+
+// Every read-only endpoint the app's sidebar depends on, with a shape assertion.
+const ROUTES = [
+  ['/api/health', (j) => j && j.status === 'ok'],
+  ['/api/seller', (j) => j && j.business_name === 'Surya Tech' && j.state_code],
+  ['/api/products', (j) => Array.isArray(j) && j.length > 0 && j.every((p) => p.hsn_code && p.gst_rate !== null)],
+  ['/api/customers', (j) => Array.isArray(j) && j.length > 0 && j.every((c) => c.gstin && c.state_name)],
+  ['/api/stock', (j) => Array.isArray(j) && j.length > 0 && j.every((s) => 'low_stock' in s)],
+  ['/api/orders', (j) => Array.isArray(j) && j.length > 0 && j.every((o) => o.order_no && o.customer_name)],
+  ['/api/quotations', (j) => Array.isArray(j) && j.length > 0 && j.every((q) => q.quotation_no && q.customer_name)],
+  ['/api/invoices', (j) => Array.isArray(j) && j.length > 0 && j.every((i) => i.invoice_no && i.customer_name)],
+  ['/api/lots', (j) => Array.isArray(j) && j.length > 0 && j.every((l) => l.lot_no && l.supplier)],
+  ['/api/technical-visits', (j) => Array.isArray(j) && j.length > 0 && j.every((v) => v.engineer && v.customer_name)],
+  ['/api/quality-checks', (j) => Array.isArray(j) && j.length > 0],
+  ['/api/income-expenses', (j) => Array.isArray(j) && j.length > 0 && j.every((e) => 'running_balance' in e)],
+  ['/api/reports/sales-over-time', (j) => Array.isArray(j) && j.length > 0 && j.every((m) => m.month && 'sales' in m)],
+  ['/api/reports/profit-by-month', (j) => Array.isArray(j) && j.length > 0 && j.every((m) => 'profit' in m)],
+  ['/api/reports/stock-by-product', (j) => Array.isArray(j) && j.length > 0 && j.every((s) => s.product && s.unit)],
+  ['/api/reports/orders-by-status', (j) => Array.isArray(j) && j.length > 0],
+  ['/api/reports/invoices-by-status', (j) => Array.isArray(j) && j.length > 0],
+  ['/api/reports/income-expense-by-month', (j) => Array.isArray(j) && j.length === 6],
+  ['/api/reports/salary-this-month', (j) => j && typeof j.total === 'number' && j.total > 0],
+  ['/api/reports/pending-payments', (j) => j && typeof j.total_due === 'number'],
+  ['/api/reports/orders-today', (j) => j && typeof j.count === 'number' && typeof j.date === 'string'],
+  ['/api/reports/pending-approval', (j) => j && typeof j.count === 'number' && Array.isArray(j.orders)],
+  ['/api/invoices/pending', (j) => j && typeof j.total_due === 'number' && Array.isArray(j.items)
+    && j.buckets && j.buckets['0-30'] !== undefined && j.buckets['31-60'] !== undefined && j.buckets['60+'] !== undefined]
+];
+
+async function main() {
+  console.log('Smoke testing ' + BASE + '\n');
+
+  const health = await get('/api/health');
+  if (health.status !== 200) {
+    console.log('Cannot reach the API at ' + BASE + ' (' + (health.error || 'HTTP ' + health.status) + ')');
+    console.log('Start it first:  cd backend && npm start');
+    process.exit(2);
   }
-  const r = await fetch(BASE + p, opt);
-  let j = null;
-  try {
-    j = await r.json();
-  } catch (e) {}
-  return { status: r.status, json: j };
-};
 
-(async () => {
-  // Step 6: Batches
-  let r = await api('GET', '/api/batches');
-  check('batches list -> 200 + 3 rows', r.status === 200 && r.json.length === 3, r);
-  const b3 = r.json.find((b) => b.batch_code === 'LS3-2026-B03');
-  check('batch 3 in Packed stage', b3 && b3.stage === 'Packed', b3opera);
+  for (const [path, shape] of ROUTES) {
+    const r = await get(path);
+    check('GET ' + path + ' -> 200 with the expected shape', r.status === 200 && shape(r.json), r.status !== 200 ? r : r.json && Object.keys(r.json).slice(0, 6));
+  }
 
-  r = await api('GET', '/api/batches/1');
-  check('batch 1 detail LS2 + Stitching + cost 955', r.status === 200 && r.json.product_code === 'LS2' && r.json.stage === 'Stitching' && r.json.unit_cost === 955, r.json);
+  // Detail routes need an id from the list.
+  const orders = (await get('/api/orders')).json;
+  const invoices = (await get('/api/invoices')).json;
+  const quotations = (await get('/api/quotations')).json;
+  const lots = (await get('/api/lots')).json;
+  const visits = (await get('/api/technical-visits')).json;
+  const customers = (await get('/api/customers')).json;
 
-  r = await api('POST', '/api/batches', { batch_code: 'B0000', product_id: 1, quantity: 50, stage: 'Cutting' });
-  const createdB = r.json;
-  check('POST batch -> 201 + id', r.status === 201 && Number.isInteger(createdB.id), r);
+  if (orders && orders[0]) {
+    const r = await get('/api/orders/' + orders[0].id);
+    check('GET /api/orders/:id -> 200 with line items', r.status === 200 && Array.isArray(r.json.items) && r.json.items.length > 0, r.status);
+  }
+  if (invoices && invoices[0]) {
+    const r = await get('/api/invoices/' + invoices[0].id);
+    check('GET /api/invoices/:id -> 200 with lines and payments',
+      r.status === 200 && Array.isArray(r.json.items) && Array.isArray(r.json.payments) && r.json.demo_notice, r.status);
+  }
+  if (quotations && quotations[0]) {
+    const r = await get('/api/quotations/' + quotations[0].id);
+    check('GET /api/quotations/:id -> 200 with line items', r.status === 200 && Array.isArray(r.json.items) && r.json.items.length > 0, r.status);
+  }
+  if (lots && lots[0]) {
+    const r = await get('/api/lots/' + lots[0].id);
+    check('GET /api/lots/:id -> 200', r.status === 200 && r.json.lot_no === lots[0].lot_no, r.status);
+  }
+  if (visits && visits[0]) {
+    const r = await get('/api/technical-visits/' + visits[0].id);
+    check('GET /api/technical-visits/:id -> 200', r.status === 200 && r.json.engineer === visits[0].engineer, r.status);
+  }
+  if (customers && customers[0]) {
+    const r = await get('/api/customers/' + customers[0].id + '/orders');
+    check('GET /api/customers/:id/orders -> 200 with orders and invoices',
+      r.status === 200 && Array.isArray(r.json.orders) && Array.isArray(r.json.invoices), r.status);
+  }
 
-  r = await api('POST', '/api/batches/' + createdB.id + '/advance');
-  check('advance Cutting -> Stitching', r.status === 200 && r.json.stage === 'Stitching', r.json);
-  r = await api('POST', '/api/batches/' + createdB.id + '/advance');
-  r = await api('POST', '/api/batches/' + createdB.id + '/advance');
-  r = await api('POST', '/api/batches/' + createdB.id + '/advance');
-  check('advance to Quality Check', r.status === 200 && r.json.stage === 'Quality Check', r.json);
+  // Filters the screens actually use.
+  const filtered = await get('/api/orders?status=Confirmed');
+  check('GET /api/orders?status=Confirmed -> only confirmed orders',
+    filtered.status === 200 && filtered.json.every((o) => o.status === 'Confirmed'), filtered.json && filtered.json.length);
+  const low = await get('/api/stock?low=1');
+  check('GET /api/stock?low=1 -> only below reorder level',
+    low.status === 200 && low.json.length > 0 && low.json.every((s) => s.low_stock === 1), low.json && low.json.length);
+  const open = await get('/api/quotations?status=Accepted');
+  check('GET /api/quotations?status=Accepted -> only accepted quotations',
+    open.status === 200 && open.json.every((q) => q.status === 'Accepted'), open.json && open.json.length);
 
-  // Step 6: Quality
-  r = await api('GET', '/api/quality-checks');
-  check('quality list -> 200 + 2 rows', r.status === 200 && r.json.length === 2, r);
-  r = await api('GET', '/api/quality-checks?grade=Export Grade');
-  check('grade=Export Grade filter -> 1', r.status === 200 && r.json.length === 1, r);
+  const missing = await get('/api/orders/999999');
+  check('GET a missing record -> 404 JSON, not a crash',
+    missing.status === 404 && missing.json && missing.json.error, missing.json);
+  const unknown = await get('/api/does-not-exist');
+  check('GET an unknown path -> 404 JSON', unknown.status === 404 && unknown.json && unknown.json.error, unknown.json);
 
-  // Step 7: Ledger
-  r = await api('GET', '/api/income-expenses');
-  check('ledger -> 200 + 8 rows', r.status === 200 && r.json.length === 8, r);
-  const inc = r.json.filter((e) => e.type === 'Income');
-  const exp = r.json.filter((e) => e.type === 'Expense');
-  const totalInc = inc.reduce((s, e) => s + e.amount, 0);
-  const totalExp = exp.reduce((s, e) => s + e.amount, 0);
-  check('income sum = 702000', totalInc === 702000, totalInc);
-  check('expense sum = 344200', totalExp === 344200, totalExp);
-  check('net profit = 357800', totalInc - totalExp === 357800, totalInc - totalExp);
-  check('monthly note balance column present', r.json.every((e) => 'running_balance' in e), r.json.filter((e) => !('running_balance' in e)));
+  console.log('\n=== LIVE SERVER: ' + passed + ' passed, ' + failed + ' failed ===');
+  if (failed) console.log('Failed checks:\n  - ' + failures.join('\n  - '));
+  process.exit(failed ? 1 : 0);
+}
 
-  r = await api('POST', '/api/income-expenses', { entry_date: '2026-09-20', type: 'Expense', category: 'Raw Material Purchase', amount: 40, note: 'x' });
-  const lc = r.json;
-  check('POST ledger -> 201 + id', r.status === 201 && Number.isInteger(lc.id), r74323);
-
-  // Step 7: Reports
-  r = await api('GET', '/api/reports/sales-over-time');
-  check('sales-over-time -> >=2 points', r.status === 200 && r.json.length >= 2, r);
-  const sep = r.json.find((x) => x.month === '2026-09');
-  check('Sep 2026 sales = 290000', sep && sep.sales === 290000, sep);
-  r = await api('GET', '/api/reports/profit-by-month');
-  const sepP = r.json.find((x) => x.month === '2026-09');
-  check('Sep 2026 profit = 149200', sepP && sepP.profit === 149200, sepP);
-  r = await api('GET', '/api/reports/stock-by-style');
-  const ls6 = r.json.find((x) => x.style === 'LS6');
-  check('LS6 finished pairs = 6', ls6 && ls6.pairs === 6, ls6);
-  r = await api('GET', '/api/reports/orders-by-status');
-  check('orders-by-status -> 5 statuses', r.status === 200 && r.json.length >= 5, r);
-
-  console.log('RESULT: ' + pass + ' passed, ' + fail + ' failed');
-  process.exit(fail === 0 ? 0 : 1);
-})().catch((e) => {
-  console.error('VERIFY ERROR: ' + e.message);
-  process.exit(2);
-});
+main();

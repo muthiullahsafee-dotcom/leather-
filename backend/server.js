@@ -18,8 +18,12 @@ init()
     app.use('/api/products', require('./routes/products'));
     app.use('/api/stock', require('./routes/stock'));
     app.use('/api/customers', require('./routes/customers'));
+    app.use('/api/quotations', require('./routes/quotations'));
     app.use('/api/orders', require('./routes/orders'));
-    app.use('/api/batches', require('./routes/batches'));
+    app.use('/api/invoices', require('./routes/invoices'));
+    app.use('/api/technical-visits', require('./routes/visits'));
+    app.use('/api/seller', require('./routes/seller'));
+    app.use('/api/lots', require('./routes/batches'));
     app.use('/api/quality-checks', require('./routes/quality'));
     app.use('/api/income-expenses', require('./routes/ledger'));
     app.use('/api/reports', require('./routes/reports'));
@@ -34,7 +38,7 @@ init()
     });
 
     const server = app.listen(PORT, () => {
-      console.log(`Leather Stylish API running on http://localhost:${PORT}`);
+      console.log(`Surya Tech API running on http://localhost:${PORT}`);
     });
 
     module.exports = { app, server, db };

@@ -9,4 +9,6 @@ export const PALETTE = {
   pie: ['#B5651D', '#3F5A44', '#A64B3B', '#8A6A4A', '#C9A227', '#6B7A66']
 };
 
-export const inr = (v) => '₹ ' + Number(v).toLocaleString('en-IN');
+// Recharts formatters need a plain string, so the money and month helpers are
+// re-exported from format.js rather than redefined here.
+export { inr, inr2, monthLabel, dateLabel } from './format.js';

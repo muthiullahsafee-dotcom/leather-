@@ -27,13 +27,13 @@ router.get('/:id', wrap(async (req, res) => {
 }));
 
 router.post('/', wrap(async (req, res) => {
-  const { entry_date, type, category, amount, note } = req.body || {};
+  const { entry_date, type, category, amount, note, invoice_id } = req.body || {};
   if (!entry_date || !type || type !== 'Income' && type !== 'Expense' || amount === undefined || amount === null) {
     return res.status(400).json({ error: 'entry_date, type and amount are required (type is Income or Expense)' });
   }
   const info = await db.run(
-    'INSERT INTO income_expenses (entry_date, type, category, amount, note) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-    [entry_date, type, category || null, amount, note || null]
+    'INSERT INTO income_expenses (entry_date, type, category, amount, note, invoice_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+    [entry_date, type, category || null, amount, note || null, invoice_id || null]
   );
   res.status(201).json(await db.get('SELECT * FROM income_expenses WHERE id = $1', [info.lastId]));
 }));

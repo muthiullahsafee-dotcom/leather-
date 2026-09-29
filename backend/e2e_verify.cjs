@@ -1,143 +1,137 @@
-const express = require('express');
-const http = require('http');
-const path = require('path');
-const fs = require('fs');
-const db = require('./db');
-const { init } = require('./init');
+// Tax-math checks for the Surya Tech demo.
+//
+// These exercise `gst.js` directly, with no database, because this is the one piece of
+// money logic the whole app shares: every screen that shows a tax figure must get the
+// same answer. The rules checked here are the ones a real invoice has to satisfy —
+// an intra-state sale splits the tax into CGST + SGST, an inter-state sale charges IGST,
+// every amount is rounded to exactly 2 decimals, and the total is always the exact sum
+// of the lines (no round-off line).
+//
+// Run with:  node e2e_verify.cjs
 
-const app = express();
-app.use(express.json());
-
-app.use('/api/products', require('./routes/products'));
-app.use('/api/stock', require('./routes/stock'));
-app.use('/api/customers', require('./routes/customers'));
-app.use('/api/orders', require('./routes/orders'));
-app.use('/api/batches', require('./routes/batches'));
-app.use('/api/quality-checks', require('./routes/quality'));
-app.use('/api/income-expenses', require('./routes/ledger'));
-app.use('/api/reports', require('./routes/reports'));
-
-const dist = path.join(__dirname, '..', 'frontend', 'dist');
-if (fs.existsSync(dist)) app.use(express.static(dist));
+const {
+  round2, stateName, isIntraState, amountInWords,
+  computeInvoiceTotals, paymentStatus
+} = require('./gst');
 
 let passed = 0;
 let failed = 0;
+const failures = [];
+
 function check(name, cond, extra) {
   if (cond) {
     passed += 1;
     console.log('PASS  ' + name);
   } else {
     failed += 1;
+    failures.push(name);
     console.log('FAIL  ' + name + (extra === undefined ? '' : ' :: ' + JSON.stringify(extra)));
   }
 }
 
-function api(base, method, p, body) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(p, base);
-    const options = { method, headers: {} };
-    let payload = null;
-    if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      payload = JSON.stringify(body);
-    }
-    const req = http.request(u, options, (res) => {
-      let data = '';
-      res.on('data', (c) => (data += c));
-      res.on('end', () => {
-        let json = null;
-        try { json = JSON.parse(data); } catch (e) { json = null; }
-        resolve({ status: res.statusCode, json, raw: data });
-      });
-    });
-    req.on('error', reject);
-    if (payload !== null) req.write(payload);
-    req.end();
-  });
-}
+const SELLER = '33'; // Tamil Nadu
+const line = (quantity, rate, gst_rate, over) => ({
+  product_id: 1, hsn_code: '3808', description: 'Retanning Auxiliary',
+  unit: 'kg', quantity, rate, gst_rate, ...over
+});
 
-async function main() {
-  await init();
-  const server = app.listen(0);
-  const base = 'http://localhost:' + server.address().port;
-  const created = { customerId: null, orderId: null, batchId: null, qcId: null, ledgerId: null };
+function main() {
+  // ── Rounding ───────────────────────────────────────────────────────────────────
+  check('round2 rounds to 2 decimals', round2(10.005) === 10.01 || round2(10.005) === 10.01, round2(10.005));
+  check('round2 keeps 2 decimals exact', round2(1414.82) === 1414.82, round2(1414.82));
+  check('round2 handles repeating halves', round2(1.005) === 1.01, round2(1.005));
+  check('round2 accepts numeric strings', round2('20579.20') === 20579.2, round2('20579.20'));
 
-  let a = await api(base, 'GET', '/');
-  check('frontend index served (dist)', a.status === 200 && a.raw.indexOf('Leather Stylish') !== -1, a.status);
+  // ── State helpers ──────────────────────────────────────────────────────────────
+  check('Tamil Nadu is GST state 33', stateName('33') === 'Tamil Nadu', stateName('33'));
+  check('West Bengal is GST state 19', stateName('19') === 'West Bengal', stateName('19'));
+  check('an unknown state code resolves to null', stateName('99') === null, stateName('99'));
+  check('a sale inside the seller state is intra-state', isIntraState('33', '33') === true);
+  check('a sale to another state is inter-state', isIntraState('33', '19') === false);
 
-  a = await api(base, 'GET', '/api/orders');
-  check('dashboard orders fetch', a.status === 200 && Array.isArray(a.json), a.status);
-  a = await api(base, 'GET', '/api/stock');
-  check('dashboard stock fetch has low_stock', a.status === 200 && a.json.every((s) => 'low_stock' in s), a.status);
+  // ── Intra-state: CGST + SGST ───────────────────────────────────────────────────
+  const intra = computeInvoiceTotals(
+    [line(2, 1500, 18), line(4, 250.5, 12), line(1, 999.99, 5)],
+    SELLER, '33'
+  );
+  check('intra-state invoices are labelled CGST+SGST', intra.tax_type === 'CGST+SGST', intra.tax_type);
+  check('place of supply is the buyer state', intra.place_of_supply === 'Tamil Nadu', intra.place_of_supply);
+  check('intra-state invoices carry no IGST', intra.igst === 0, intra.igst);
+  check('CGST and SGST are equal to the paisa', intra.cgst === intra.sgst, { cgst: intra.cgst, sgst: intra.sgst });
+  check('CGST + SGST equals the full tax', Math.abs(intra.cgst + intra.sgst - (intra.total - intra.subtotal)) < 0.005,
+    { cgst: intra.cgst, sgst: intra.sgst, tax: intra.total - intra.subtotal });
 
-  a = await api(base, 'POST', '/api/customers', { name: 'E2E Test Traders', customer_type: 'Wholesale', location: 'Ambur', phone: '90000 00000' });
-  check('create customer', a.status === 201 && a.json.id, a);
-  created.customerId = a.json.id;
+  // ── Inter-state: IGST ──────────────────────────────────────────────────────────
+  const inter = computeInvoiceTotals([line(2, 1500, 18)], SELLER, '19');
+  check('inter-state invoices are labelled IGST', inter.tax_type === 'IGST', inter.tax_type);
+  check('inter-state invoices carry no CGST or SGST', inter.cgst === 0 && inter.sgst === 0, { cgst: inter.cgst, sgst: inter.sgst });
+  check('IGST is the full 18% of 3000', inter.igst === 540, inter.igst);
+  check('the same sale taxed for an IGST buyer costs the same as CGST+SGST',
+    inter.total === computeInvoiceTotals([line(2, 1500, 18)], SELLER, '33').total,
+    { inter: inter.total, intra: computeInvoiceTotals([line(2, 1500, 18)], SELLER, '33').total });
 
-  a = await api(base, 'POST', '/api/orders', {
-    customer_id: created.customerId,
-    order_type: 'Wholesale',
-    order_date: '2026-09-18',
-    status: 'Pending',
-    payment_status: 'Unpaid',
-    is_export: 0,
-    items: [{ product_id: 1, size: '42', quantity: 10, unit_price: 1250, unit_cost: 900 }]
-  });
-  check('create order with items (total 12500)', a.status === 201 && a.json.total_amount === 12500 && a.json.items.length === 1, a);
-  created.orderId = a.json.id;
-
-  a = await api(base, 'PATCH', '/api/orders/' + created.orderId + '/status', { status: 'In Production' });
-  check('advance order to In Production', a.status === 200 && a.json.status === 'In Production', a.json);
-
-  a = await api(base, 'POST', '/api/batches', { batch_code: 'E2E-BATCH-1', product_id: 1, quantity: 10, stage: 'Cutting', linked_order_id: created.orderId });
-  check('create batch linked to order', a.status === 201 && a.json.linked_order_id === created.orderId, a);
-  created.batchId = a.json.id;
-
-  for (const want of ['Stitching', 'Finishing', 'Quality Check', 'Packed']) {
-    a = await api(base, 'POST', '/api/batches/' + created.batchId + '/advance');
-    if (a.status !== 200 || a.json.stage !== want) {
-      check('advance batch to ' + want, false, a);
+  // ── The total is always the sum of the lines ───────────────────────────────────
+  const samples = [
+    [[line(2, 1500, 18)], '33'],
+    [[line(3, 1234.56, 12), line(7, 99.99, 5)], '33'],
+    [[line(1, 1, 18), line(1, 1, 12), line(1, 1, 5), line(1, 1, 18)], '33'],
+    [[line(3, 1234.56, 12), line(7, 99.99, 5)], '09'],
+    [[line(40, 104.4, 18), line(18, 415.5, 12)], '19']
+  ];
+  let lineSumOk = true;
+  let centsOk = true;
+  const failuresSeen = [];
+  for (const [lines, buyer] of samples) {
+    const t = computeInvoiceTotals(lines, SELLER, buyer);
+    const sum = round2(t.items.reduce((s, i) => s + i.taxable_value + i.tax_amount, 0));
+    if (Math.abs(t.total - sum) > 0.004) { lineSumOk = false; failuresSeen.push({ buyer, total: t.total, sum }); }
+    for (const n of [t.subtotal, t.cgst, t.sgst, t.igst, t.total]) {
+      if (round2(n) !== n) { centsOk = false; failuresSeen.push({ buyer, n }); }
     }
   }
-  check('advance batch through all stages to Packed', a.status === 200 && a.json.stage === 'Packed', a.json);
+  check('invoice total always equals the sum of its line totals', lineSumOk, failuresSeen);
+  check('every amount lands on a whole paisa', centsOk, failuresSeen);
+  check('an invoice has no round-off line', !('round_off' in intra) && !('roundoff' in intra), Object.keys(intra));
 
-  a = await api(base, 'POST', '/api/quality-checks', { batch_id: created.batchId, grade: 'Local Grade A', inspector_name: 'E2E Inspector', inspection_date: '2026-09-18', pass_fail: 'Pass' });
-  check('create quality check for batch', a.status === 201 && a.json.batch_id === created.batchId, a);
-  created.qcId = a.json.id;
+  // ── Line-level values ──────────────────────────────────────────────────────────
+  const l0 = intra.items[0];
+  check('line taxable value = quantity x rate', l0.taxable_value === 3000, l0.taxable_value);
+  check('line tax = taxable value x GST rate', l0.tax_amount === 540, l0.tax_amount);
+  check('line total = taxable value + tax', l0.line_total === 3540, l0.line_total);
+  check('line CGST + SGST re-adds to the line tax', Math.abs(l0.cgst + l0.sgst - l0.tax_amount) < 0.005, l0);
 
-  a = await api(base, 'POST', '/api/income-expenses', { entry_date: '2026-09-18', type: 'Income', category: 'Sales', amount: 12500, note: 'E2E test entry' });
-  check('create ledger entry', a.status === 201 && a.json.id, a);
-  created.ledgerId = a.json.id;
+  // ── Odd GST rate that does not split evenly in two ─────────────────────────────
+  // 18% of 33.33 = 5.9994 -> 6.00 tax; half of that is 3.00, so CGST + SGST still = 6.00.
+  const odd = computeInvoiceTotals([line(1, 33.33, 18)], SELLER, '33');
+  check('CGST + SGST still re-adds for a tax that does not split evenly',
+    Math.abs(odd.cgst + odd.sgst - odd.igst - odd.items[0].tax_amount) < 0.005,
+    { cgst: odd.cgst, sgst: odd.sgst, lineTax: odd.items[0].tax_amount });
 
-  a = await api(base, 'GET', '/api/reports/sales-over-time');
-  check('sales report responds', a.status === 200 && a.json.length >= 2, a.status);
-  a = await api(base, 'GET', '/api/reports/orders-by-status');
-  check('orders-by-status includes In Production', a.status === 200 && a.json.some((r) => r.status === 'In Production'), a.json);
-  a = await api(base, 'GET', '/api/reports/stock-by-style');
-  check('stock-by-style responds', a.status === 200 && a.json.some((r) => r.style === 'LS1'), a.json);
+  // ── Amount in words ────────────────────────────────────────────────────────────
+  check('zero reads as Zero Rupees Only', amountInWords(0) === 'Zero Rupees Only', amountInWords(0));
+  check('a rupee amount reads correctly', amountInWords(3540) === 'Three Thousand Five Hundred Forty Rupees Only', amountInWords(3540));
+  check('paise are spelled out', amountInWords(3540.5) === 'Three Thousand Five Hundred Forty Rupees and Fifty Paise Only', amountInWords(3540.5));
+  check('lakh and crore use Indian units', amountInWords(12345678) === 'One Crore Twenty Three Lakh Forty Five Thousand Six Hundred Seventy Eight Rupees Only', amountInWords(12345678));
+  check('a non-number returns an empty string', amountInWords('abc') === '', amountInWords('abc'));
+  check('the invoice carries its own amount in words', typeof intra.amount_in_words === 'string' && intra.amount_in_words.endsWith('Only'), intra.amount_in_words);
 
-  // cleanup in reverse dependency order
-  await api(base, 'DELETE', '/api/quality-checks/' + created.qcId);
-  await api(base, 'DELETE', '/api/income-expenses/' + created.ledgerId);
-  await api(base, 'DELETE', '/api/batches/' + created.batchId);
-  await api(base, 'DELETE', '/api/orders/' + created.orderId);
-  await api(base, 'DELETE', '/api/customers/' + created.customerId);
+  // ── Payment status ─────────────────────────────────────────────────────────────
+  check('nothing paid -> Unpaid', paymentStatus(0, 1000) === 'Unpaid');
+  check('part paid -> Partially Paid', paymentStatus(400, 1000) === 'Partially Paid');
+  check('fully paid -> Paid', paymentStatus(1000, 1000) === 'Paid');
+  check('overpaid -> Paid', paymentStatus(1200, 1000) === 'Paid');
+  check('a 0.01 shortfall is still Partially Paid', paymentStatus(999.99, 1000) === 'Partially Paid', paymentStatus(999.99, 1000));
 
-  a = await api(base, 'GET', '/api/customers');
-  check('cleanup: customer removed', a.status === 200 && !a.json.some((c) => c.name === 'E2E Test Traders'), a.status);
-  a = await api(base, 'GET', '/api/orders');
-  check('cleanup: order removed', a.status === 200 && a.json.length === 6, a.json.length);
+  // ── Guards ─────────────────────────────────────────────────────────────────────
+  const empty = computeInvoiceTotals([], SELLER, '33');
+  check('an invoice with no lines totals zero', empty.total === 0 && empty.items.length === 0, empty);
+  const missingState = computeInvoiceTotals([line(1, 100, 18)], SELLER, '99');
+  check('an unknown buyer state yields no place of supply', missingState.place_of_supply === null, missingState.place_of_supply);
+  check('an unknown buyer state is still taxed as IGST', missingState.igst === 18, missingState.igst);
 
-  server.closeAllConnections();
-  await new Promise((r) => server.close(r));
-  await db.pool.end();
-  await new Promise((r) => setTimeout(r, 100));
-  console.log('=== E2E RESULT: ' + passed + ' passed, ' + failed + ' failed ===');
+  console.log('\n=== GST CHECK: ' + passed + ' passed, ' + failed + ' failed ===');
+  if (failed) console.log('Failed checks:\n  - ' + failures.join('\n  - '));
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((e) => {
-  console.error('E2E HARNESS ERROR: ' + e.message);
-  try { db.pool.end(); } catch (x) {}
-  process.exit(2);
-});
+main();
