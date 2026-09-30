@@ -38,6 +38,7 @@ lether campany/
 │  ├─ numbers.js             # document number sequences (QTN / SO / ST by financial year)
 │  ├─ dates.js               # calendar-date helpers (today, addDays, daysBetween)
 │  ├─ reset.js               # drops the tables, re-inits, then seeds
+│  ├─ backup.js              # dumps every table to backup/<date>/ before a reseed
 │  ├─ verify.js              # checks the schema columns
 │  ├─ verify_seed.cjs        # checks the dataset itself (needs no database)
 │  ├─ check_seed.cjs         # checks seeded row counts + integrity
@@ -81,7 +82,9 @@ the backend at it before starting:
 cd backend
 npm install
 copy .env.example .env       # then edit .env with your real DATABASE_URL
+npm run backup                 # dump every table to backup/<date>/ (before any reseed)
 npm run reseed                # apply the schema if needed, then load sample data
+npm run reset                 # heavier path: drop the tables, rebuild the schema, then seed
 npm run dev                  # http://localhost:3001
 ```
 
@@ -89,6 +92,12 @@ npm run dev                  # http://localhost:3001
 the schema if needed, then empties every business table and reloads the sample data; it is
 safe to re-run and always converges on the same dataset. Set `PG_SSL=false`
 only for a Postgres that does not use TLS.
+
+**Always take a backup first.** `npm run reseed` deletes every row, and the demo data is
+the only data there is. `npm run backup` writes `dump.sql` (COPY format, restorable with
+`psql "$DATABASE_URL" -f backup/<date>/dump.sql`), `tables.json`, and a `manifest.json` of
+per-table row counts. It uses the same connection string the app does, so it works on a
+host that has node-postgres but no `psql` — which is the case for the Render shell.
 
 ### 2. Frontend
 
@@ -336,6 +345,7 @@ From `backend/`:
 ```
 npm run verify       # route-level checks
 npm run verify:seed  # the dataset itself (needs no database)
+npm run backup       # dump every table to backup/<date>/
 node verify.js       # tables + expected columns
 node check_seed.cjs  # seed row counts + referential integrity
 node e2e_verify.cjs  # end-to-end flow check (frontend dist + API)

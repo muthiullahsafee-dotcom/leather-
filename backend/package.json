@@ -8,6 +8,7 @@
     "dev": "node --env-file-if-exists=.env server.js",
     "reseed": "node seed.js",
     "reset": "node reset.js",
+    "backup": "node backup.js",
     "verify": "node route_verify.cjs",
     "verify:seed": "node verify_seed.cjs"
   },

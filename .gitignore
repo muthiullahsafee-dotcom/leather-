@@ -5,3 +5,7 @@ database/
 .env
 .env.local
 .env.*.local
+
+# Database exports. A backup holds whatever the live database had at that moment,
+# including the old catalogue, so it stays on the machine that took it.
+backup/
