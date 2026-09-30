@@ -1,7 +1,3 @@
-const db = require('./db');
-const { init } = require('./init');
-const { seed, counts } = require('./seed');
-
 // Drops every demo table and rebuilds it from scratch, then loads a fresh set of
 // sample data. This is the "wipe the slate completely" path, for when the schema
 // itself has drifted (not just the data).
@@ -10,26 +6,15 @@ const { seed, counts } = require('./seed');
 // `npm run reseed`, which empties the rows and re-inserts without dropping anything.
 // Both end up at the same dataset; reset just gets there by a heavier route.
 //
-// The drop order respects the foreign keys, and the whole thing is a single
-// transaction so a failure leaves the previous demo data untouched.
-const TABLES = [
-  'invoice_payments',
-  'invoice_items',
-  'invoices',
-  'quotation_items',
-  'quotations',
-  'technical_visits',
-  'quality_checks',
-  'lots',
-  'stock_items',
-  'order_items',
-  'orders',
-  'customers',
-  'products',
-  'income_expenses',
-  'seller_profile'
-];
+// The table list comes from seed.js so there is one definition of the set of tables,
+// shared with the backup and the wipe.
+const db = require('./db');
+const { init } = require('./init');
+const { seed, counts, TABLES } = require('./seed');
 
+// DROP ... CASCADE removes the dependent tables' constraints too, so unlike the row
+// wipe this order does not have to satisfy the foreign keys. It is still a single
+// transaction, so a failure leaves the previous schema and data in place.
 async function reset() {
   await db.tx(async (x) => {
     for (const t of TABLES) {

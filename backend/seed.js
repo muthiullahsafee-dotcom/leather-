@@ -21,11 +21,16 @@ const {
 // assert every invariant (low-stock count, ageing, GST split, monthly profit) without
 // a database connection.
 
-// Every table that holds demo data, ordered child-first so the deletes never trip a
-// foreign key. `quality_checks` is emptied but never repopulated: incoming-lot
-// inspection is a hidden screen, and leaving it empty keeps the demo free of records
-// that reference nothing the user can see.
+// Every table that holds demo data, ordered so no delete ever trips a foreign key.
+//
+// income_expenses.invoice_id references invoices, and it is the one dependency that
+// catches people out: a ledger row is a cash receipt posted against an invoice, so it
+// has to be emptied before the invoices it points at.
+//
+// quality_checks is emptied but never repopulated: incoming-lot inspection is a hidden
+// screen, and leaving it empty keeps the demo free of records the user can never open.
 const TABLES = [
+  'income_expenses',
   'invoice_payments',
   'invoice_items',
   'invoices',
@@ -39,7 +44,6 @@ const TABLES = [
   'orders',
   'customers',
   'products',
-  'income_expenses',
   'seller_profile'
 ];
 
@@ -51,6 +55,12 @@ const COUNTS_TABLES = [
 
 // Deletion order as one list of statements, so a failure part-way leaves an obvious
 // gap in the log rather than a silent partial reset.
+//
+// income_expenses has to go before invoices: the seeded ledger rows carry an
+// invoice_id that points at the invoice they were paid against, so emptying the
+// invoices first trips the foreign key. This only bites on the *second* run —
+// against a database that was never seeded there are no invoice-linked ledger
+// rows yet, so the first pass happens to get away with it.
 async function wipe() {
   for (const t of TABLES) {
     await db.run(`DELETE FROM ${t}`);

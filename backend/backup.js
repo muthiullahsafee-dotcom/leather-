@@ -22,25 +22,10 @@ const db = require('./db');
 
 const OUT_ROOT = path.join(__dirname, '..', 'backup');
 
-// Every table holding demo data, child-first. Matches the wipe order in seed.js, so a
-// dump can be replayed in the reverse direction without tripping a foreign key.
-const TABLES = [
-  'invoice_payments',
-  'invoice_items',
-  'invoices',
-  'quotation_items',
-  'quotations',
-  'technical_visits',
-  'quality_checks',
-  'lots',
-  'stock_items',
-  'order_items',
-  'orders',
-  'customers',
-  'products',
-  'income_expenses',
-  'seller_profile'
-];
+// Every table holding demo data, in the one shared delete order. Imported rather than
+// re-listed so a backup and a wipe can never drift apart and end up walking the tables
+// in different orders.
+const { TABLES } = require('./seed');
 
 // Postgres COPY text format escapes these inside a field. Tabs and newlines in a value
 // would otherwise break the line-oriented format, so they have to be escaped.
