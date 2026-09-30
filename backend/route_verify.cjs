@@ -15,6 +15,7 @@ const db = require('./db');
 const { init } = require('./init');
 const { today, thisMonth, addDays, daysBetween } = require('./dates');
 const { round2 } = require('./gst');
+const { financialYear } = require('./numbers');
 
 const KEEP = process.argv.includes('--keep');
 
@@ -113,7 +114,7 @@ async function main() {
 
   r = await api(base, 'GET', '/api/lots');
   const lots = r.json;
-  check('GET /api/lots -> 9 supplier lots', r.status === 200 && lots.length === 9, lots && lots.length);
+  check('GET /api/lots -> 15 supplier lots', r.status === 200 && lots.length === 15, lots && lots.length);
   check('lots carry a lot number, supplier, received and expiry date',
     lots.every((l) => /^LOT-\d{4}-\d{4}$/.test(l.lot_no) && l.supplier && l.received_date && l.expiry_date), lots[0]);
 
@@ -126,7 +127,9 @@ async function main() {
     visits.every((v) => ['Open', 'Follow-up Due', 'Resolved'].includes(v.status)), visits.map((v) => v.status));
 
   r = await api(base, 'GET', '/api/quality-checks');
-  check('GET /api/quality-checks -> 2 inspections on lots', r.status === 200 && r.json.length === 2, r.json);
+  // Incoming-lot inspection is a hidden screen, so the seed deliberately leaves it empty
+  // rather than seeding rows that reference lots the user can never open.
+  check('GET /api/quality-checks -> empty, the screen is hidden', r.status === 200 && r.json.length === 0, r.json);
 
   // ── Dashboard numbers ──────────────────────────────────────────────────────────
   r = await api(base, 'GET', '/api/reports/orders-today');
@@ -149,8 +152,11 @@ async function main() {
   const pending = r.json;
   check('GET /api/invoices/pending -> totals match the dashboard tile',
     pending.total_due === pendingTile.total_due && pending.invoice_count === pendingTile.invoice_count, { pending, pendingTile });
-  check('pending payments has all three ageing buckets populated',
-    pending.bucket_counts['0-30'] > 0 && pending.bucket_counts['31-60'] > 0 && pending.bucket_counts['60+'] > 0, pending.bucket_counts);
+  check('pending payments has exactly 3 overdue invoices',
+    pending.items.filter((i) => i.is_overdue).length === 3,
+    pending.items.filter((i) => i.is_overdue).map((i) => i.invoice_no + '+' + i.days_overdue + 'd'));
+  check('the overdue spread covers more than one ageing bucket',
+    pending.bucket_counts['0-30'] > 0 && (pending.bucket_counts['31-60'] > 0 || pending.bucket_counts['60+'] > 0), pending.bucket_counts);
   check('ageing bucket totals add up to the total due',
     round2(pending.buckets['0-30'] + pending.buckets['31-60'] + pending.buckets['60+']) === pending.total_due, pending.buckets);
   check('nothing is marked overdue before its due date',
@@ -188,7 +194,7 @@ async function main() {
 
   r = await api(base, 'GET', '/api/income-expenses');
   const ledger = r.json;
-  check('GET /api/income-expenses -> 42 seeded entries', r.status === 200 && ledger.length === 42, ledger && ledger.length);
+  check('GET /api/income-expenses -> 48 seeded entries', r.status === 200 && ledger.length === 48, ledger && ledger.length);
   // The route returns newest first with a running balance that accumulates oldest first,
   // so walking the array backwards must reproduce the balance on every row.
   const chronological = ledger.slice().reverse();
@@ -280,7 +286,7 @@ async function main() {
 
   r = await api(base, 'POST', '/api/invoices', { order_id: convertedOrderId, warehouse: 'Warehouse' });
   check('POST /api/invoices -> 201 tax invoice from the order',
-    r.status === 201 && /^INV-\d{4}-\d{4}$/.test(r.json.invoice_no) && r.json.items.length === 2, r.json);
+    r.status === 201 && new RegExp(`^ST/${financialYear()}/\\d{4}$`).test(r.json.invoice_no) && r.json.items.length === 2, r.json);
   const invoice = r.json;
   created.invoice = invoice.id;
 
@@ -298,7 +304,11 @@ async function main() {
   check('invoice total = subtotal + tax, with no round-off line',
     Math.abs(invoice.total_amount - (invoice.subtotal + invoice.cgst + invoice.sgst + invoice.igst)) < 0.01
       && Math.abs(invoice.total_amount - round2(invoice.subtotal + expectedTax)) < 0.01, invoice);
-  check('due date is 30 days after the invoice date', invoice.due_date === addDays(invoice.invoice_date, 30), { invoice: invoice.invoice_date, due: invoice.due_date });
+  // The due date follows the credit terms on that buyer, not a fixed 30 days, so the
+  // assertion reads the customer's own terms back instead of hardcoding them.
+  check('due date follows the customer\'s credit terms',
+    invoice.due_date === addDays(invoice.invoice_date, Number(tnCustomer.credit_terms_days) || 30),
+    { invoice: invoice.invoice_date, due: invoice.due_date, terms: tnCustomer.credit_terms_days });
 
   const stockAfter = (await api(base, 'GET', '/api/stock')).json;
   const afterA = Number(stockAfter.find((s) => s.product_code === productA.code && s.warehouse === 'Warehouse').quantity);

@@ -11,6 +11,7 @@ const db = require('./db');
 const { init } = require('./init');
 const { today, thisMonth, daysBetween } = require('./dates');
 const { round2 } = require('./gst');
+const { financialYear } = require('./numbers');
 
 let passed = 0;
 let failed = 0;
@@ -34,9 +35,11 @@ async function main() {
   await init();
 
   // ── Row counts ─────────────────────────────────────────────────────────────────
+  // quality_checks is deliberately 0: incoming-lot inspection is a hidden screen, so the
+  // seed leaves it empty rather than inserting rows the user can never reach.
   const expected = {
-    seller_profile: 1, products: 15, customers: 10, stock_items: 15, orders: 13,
-    quotations: 5, invoices: 10, lots: 9, technical_visits: 6, quality_checks: 2, income_expenses: 42
+    seller_profile: 1, products: 15, customers: 10, stock_items: 15, orders: 12,
+    quotations: 5, invoices: 10, lots: 15, technical_visits: 6, quality_checks: 0, income_expenses: 48
   };
   for (const [table, n] of Object.entries(expected)) {
     const r = await db.get(`SELECT COUNT(*) AS c FROM ${table}`);
@@ -47,8 +50,8 @@ async function main() {
   const products = await db.all('SELECT * FROM products ORDER BY code');
   check('every product has an HSN code, a unit and a GST rate',
     products.every((p) => p.hsn_code && p.unit && Number(p.gst_rate) > 0), products[0]);
-  check('GST rates are the real slabs (5 / 12 / 18)',
-    products.every((p) => [5, 12, 18].includes(Number(p.gst_rate))), [...new Set(products.map((p) => p.gst_rate))]);
+  check('chemical GST is the 18% slab throughout',
+    products.every((p) => Number(p.gst_rate) === 18), [...new Set(products.map((p) => p.gst_rate))]);
   check('selling price is above purchase price on every product',
     products.every((p) => Number(p.selling_price) > Number(p.purchase_price)), products.find((p) => Number(p.selling_price) <= Number(p.purchase_price)));
   check('brands are named (own brand or a supplier brand)',
@@ -103,6 +106,10 @@ async function main() {
     return i.status === 'Unpaid';
   }), invoices.map((i) => i.invoice_no + ':' + i.status + ':' + i.amount_paid));
   check('every invoice has an amount in words', invoices.every((i) => i.amount_in_words), invoices[0]);
+  check('invoice numbers follow the financial-year series ST/<FY>/NNNN',
+    invoices.every((i) => new RegExp(`^ST/${financialYear()}/\\d{4}$`).test(i.invoice_no)),
+    invoices.map((i) => i.invoice_no));
+  check('invoice numbers are unique', new Set(invoices.map((i) => i.invoice_no)).size === invoices.length);
   check('no invoice is dated in the future', invoices.every((i) => i.invoice_date <= today()));
   check('paid invoices record at least one payment row', (await db.get(`
     SELECT COUNT(*) AS c FROM invoices i WHERE i.amount_paid > 0
@@ -119,8 +126,12 @@ async function main() {
   check('ageing bucket totals add up to the open receivable',
     round2(buckets['0-30'] + buckets['31-60'] + buckets['60+']) === totalDue, { buckets, totalDue });
   check('at least one invoice is overdue', due.some((i) => i.due_date < today()), due.map((i) => i.invoice_no + ' ' + i.due_date));
-  check('all three ageing buckets have something in them',
-    buckets['0-30'] > 0 && buckets['31-60'] > 0 && buckets['60+'] > 0, buckets);
+  check('exactly 3 pending invoices are overdue', due.filter((i) => i.due_date < today()).length === 3,
+    due.map((i) => i.invoice_no + (i.due_date < today() ? ' OVERDUE' : '')));
+  check('the overdue spread covers more than one ageing band',
+    new Set(due.filter((i) => i.due_date < today())
+      .map((i) => { const d = daysBetween(i.due_date, today()); return d <= 30 ? '0-30' : d <= 60 ? '31-60' : '60+'; })).size > 1,
+    buckets);
 
   // ── Ledger ─────────────────────────────────────────────────────────────────────
   const months = await db.all(`
@@ -178,6 +189,12 @@ async function main() {
     customers.every((c) => ['Tannery', 'Wholesale', 'Retail'].includes(c.customer_type)), [...new Set(customers.map((c) => c.customer_type))]);
   check('at least one customer is outside Tamil Nadu, so IGST is exercised',
     customers.some((c) => c.state_code !== '33') && customers.some((c) => c.state_code === '33'));
+  check('every customer carries credit terms of 15, 30 or 45 days',
+    customers.every((c) => [15, 30, 45].includes(Number(c.credit_terms_days))),
+    customers.map((c) => `${c.name}=${c.credit_terms_days}`));
+  check('credit terms use all three bands, so ageing differs between buyers',
+    new Set(customers.map((c) => Number(c.credit_terms_days))).size === 3,
+    [...new Set(customers.map((c) => Number(c.credit_terms_days)))].join('/'));
 
   const seller = await db.get('SELECT * FROM seller_profile ORDER BY id LIMIT 1');
   check('the seller is Surya Tech in Tamil Nadu',

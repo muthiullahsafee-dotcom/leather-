@@ -32,12 +32,14 @@ lether campany/
 │  ├─ server.js              # Express app, mounts all routes, listens on 3001
 │  ├─ db.js                  # PostgreSQL pool (pg) + run/all/get/tx helpers
 │  ├─ init.js                # idempotent schema + upgrade statements
-│  ├─ seed.js                # inserts sample data
+│  ├─ seed.js                # empties every business table, then reloads sample data
+│  ├─ seed_data.js           # the sample dataset as plain data
 │  ├─ gst.js                 # GST state codes, CGST/SGST vs IGST, number-to-words
-│  ├─ numbers.js             # document number sequences (QTN / SO / INV)
+│  ├─ numbers.js             # document number sequences (QTN / SO / ST by financial year)
 │  ├─ dates.js               # calendar-date helpers (today, addDays, daysBetween)
-│  ├─ reset.js               # truncate + re-init
+│  ├─ reset.js               # drops the tables, re-inits, then seeds
 │  ├─ verify.js              # checks the schema columns
+│  ├─ verify_seed.cjs        # checks the dataset itself (needs no database)
 │  ├─ check_seed.cjs         # checks seeded row counts + integrity
 │  ├─ route_verify.cjs       # in-process checks for all route modules
 │  ├─ e2e_verify.cjs         # end-to-end flow check (serves frontend + API)
@@ -79,12 +81,13 @@ the backend at it before starting:
 cd backend
 npm install
 copy .env.example .env       # then edit .env with your real DATABASE_URL
-npm run seed                 # create tables and load sample data (idempotent)
+npm run reseed                # apply the schema if needed, then load sample data
 npm run dev                  # http://localhost:3001
 ```
 
-`DATABASE_URL` is read from `.env` (or the process environment). `npm run seed` applies
-the schema if needed and loads the sample data; it is safe to re-run. Set `PG_SSL=false`
+`DATABASE_URL` is read from `.env` (or the process environment). `npm run reseed` applies
+the schema if needed, then empties every business table and reloads the sample data; it is
+safe to re-run and always converges on the same dataset. Set `PG_SSL=false`
 only for a Postgres that does not use TLS.
 
 ### 2. Frontend
@@ -254,10 +257,30 @@ so the demo converges on one schema whether it is fresh or being migrated.
 
 ## Seed data
 
-`node seed.js` loads a realistic snapshot (verified by `check_seed.cjs`): a seller profile
-for Surya Tech in Tamil Nadu (state code 33), leather chemicals with HSN codes and GST rates,
-tanneries and merchants across several states, quotations, orders, invoices with CGST/SGST
-and IGST examples, partial payments, supplier lots, technical visits and ledger entries.
+`npm run reseed` (`node seed.js`) empties every business table and reloads a realistic
+snapshot, so it converges on the same dataset whatever state the database is in. That
+unconditional wipe is deliberate: the previous seed skipped insertion whenever a table
+already had rows, which is why a populated database kept showing the old catalogue.
+
+The dataset itself lives in `seed_data.js` as plain data, which lets `verify_seed.cjs`
+assert every invariant (low-stock count, ageing spread, GST split, per-month profit)
+without a database connection:
+
+```
+npm run verify:seed        # no DATABASE_URL needed - checks the dataset itself
+```
+
+Against a live database, `node check_seed.cjs` checks the rows that actually landed and
+`npm run verify` drives the API end to end. `npm run reset` is the heavier path: it drops
+the tables and rebuilds the schema, for when the schema itself has drifted.
+
+What the snapshot contains: a seller profile for Surya Tech in Tamil Nadu (state code 33),
+15 leather chemicals with HSN codes and 18% GST, 10 tanneries and merchants across three
+states carrying 15/30/45-day credit terms, 15 supplier lots, 5 quotations, 12 orders over
+the last two months, 10 GST invoices numbered `ST/<FY>/NNNN` with CGST/SGST and IGST
+examples, partial and full payments, 6 technical visits and 6 months of ledger entries.
+`quality_checks` is intentionally left empty, since incoming-lot inspection is a hidden
+screen.
 
 ---
 
@@ -312,6 +335,7 @@ From `backend/`:
 
 ```
 npm run verify       # route-level checks
+npm run verify:seed  # the dataset itself (needs no database)
 node verify.js       # tables + expected columns
 node check_seed.cjs  # seed row counts + referential integrity
 node e2e_verify.cjs  # end-to-end flow check (frontend dist + API)
@@ -323,15 +347,16 @@ From `frontend/`:
 npm run build        # production bundle
 ```
 
-All backend checks need `DATABASE_URL` set (a `.env` file, or `$env:DATABASE_URL` on
-Windows PowerShell); the frontend build needs only npm.
+`npm run verify:seed` is the only one that needs no database. Everything else needs
+`DATABASE_URL` set (a `.env` file, or `$env:DATABASE_URL` on Windows PowerShell); the
+frontend build needs only npm.
 
 ---
 
 ## Deployment (Render + Supabase)
 
 - **Database** — create a Supabase project, grab its pooler/project connection string and
-  set it as the backend's `DATABASE_URL`. Run `npm run seed` once against that database.
+  set it as the backend's `DATABASE_URL`. Run `npm run reseed` once against that database.
 - **Backend** — a Render Web Service: build command `npm install`, start command
   `npm start`, env var `DATABASE_URL`. It listens on `PORT` (Render injects it).
 - **Frontend** — a Render Static Site: build command `npm install && npm run build`,

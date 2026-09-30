@@ -171,9 +171,10 @@ export default function Products() {
       </div>
 
       <div className="strip">
-        <label>
+        <label className="strip-search-label">
           Search
           <input
+            className="strip-search"
             type="search"
             placeholder="Code, name, brand or HSN"
             value={q}

@@ -13,7 +13,7 @@ const db = require('./db');
 const REQUIRED = {
   seller_profile: ['id', 'business_name', 'address', 'city', 'district', 'state', 'state_code', 'gstin', 'phone', 'email', 'is_sample'],
   products: ['id', 'code', 'name', 'hsn_code', 'unit', 'brand', 'purchase_price', 'selling_price', 'gst_rate', 'reorder_level'],
-  customers: ['id', 'name', 'phone', 'location', 'customer_type', 'gstin', 'state_code'],
+  customers: ['id', 'name', 'phone', 'location', 'customer_type', 'gstin', 'state_code', 'credit_terms_days'],
   stock_items: ['id', 'product_id', 'item_name', 'quantity', 'unit', 'warehouse'],
   orders: ['id', 'order_no', 'customer_id', 'supply_type', 'order_date', 'status', 'payment_status', 'total_amount', 'delivery_date', 'vehicle_number'],
   order_items: ['id', 'order_id', 'product_id', 'quantity', 'unit_price', 'unit_cost'],

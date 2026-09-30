@@ -6,9 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --env-file-if-exists=.env server.js",
-    "seed": "node seed.js",
+    "reseed": "node seed.js",
     "reset": "node reset.js",
-    "verify": "node route_verify.cjs"
+    "verify": "node route_verify.cjs",
+    "verify:seed": "node verify_seed.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

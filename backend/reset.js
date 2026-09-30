@@ -1,10 +1,14 @@
 const db = require('./db');
 const { init } = require('./init');
-const { seed } = require('./seed');
+const { seed, counts } = require('./seed');
 
-// Drops every demo table and rebuilds it, then loads a fresh set of sample data.
-// This is the "reset + reseed" path for a demo machine: the schema is recreated by
-// the same migration code the server runs at boot, so the two can never drift.
+// Drops every demo table and rebuilds it from scratch, then loads a fresh set of
+// sample data. This is the "wipe the slate completely" path, for when the schema
+// itself has drifted (not just the data).
+//
+// For the common case — replacing the demo data while keeping the schema — use
+// `npm run reseed`, which empties the rows and re-inserts without dropping anything.
+// Both end up at the same dataset; reset just gets there by a heavier route.
 //
 // The drop order respects the foreign keys, and the whole thing is a single
 // transaction so a failure leaves the previous demo data untouched.
@@ -33,6 +37,8 @@ async function reset() {
     }
   });
   await init();
+  // seed() empties every table again before inserting, which is a no-op here but
+  // keeps both entry points on exactly one code path for the data.
   return seed();
 }
 
@@ -40,13 +46,9 @@ module.exports = { reset };
 
 if (require.main === module) {
   (async () => {
-    const seeded = await reset();
-    const counts = {};
-    for (const t of ['products', 'customers', 'stock_items', 'orders', 'quotations', 'invoices', 'lots', 'technical_visits', 'income_expenses']) {
-      counts[t] = (await db.get(`SELECT COUNT(*) AS c FROM ${t}`)).c;
-    }
-    console.log('Reset complete. Seeded tables:', seeded.join(', '));
-    console.log('Row counts:', JSON.stringify(counts));
+    await reset();
+    console.log('Reset complete (tables dropped and recreated).');
+    console.log('Row counts:', JSON.stringify(await counts(), null, 2));
     await db.pool.end();
     process.exit(0);
   })().catch((e) => {

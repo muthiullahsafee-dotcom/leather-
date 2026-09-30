@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS customers (
   location          TEXT,
   customer_type     TEXT,
   gstin             TEXT,
-  state_code        TEXT
+  state_code        TEXT,
+  credit_terms_days INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -216,6 +217,8 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_level INTEGER;
 
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS gstin TEXT;
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS state_code TEXT;
+-- Standard credit terms (15/30/45 days) a tannery is offered; drives the invoice due date.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS credit_terms_days INTEGER;
 
 -- Orders were export shipments; they are domestic lorry deliveries now.
 ALTER TABLE orders RENAME COLUMN order_type TO supply_type;

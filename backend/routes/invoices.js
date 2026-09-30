@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { today: todayISO, addDays: addDaysISO, daysBetween } = require('../dates');
 const { computeInvoiceTotals, paymentStatus, round2 } = require('../gst');
-const { nextDocNo } = require('../numbers');
+const { nextFyDocNo } = require('../numbers');
 const { DEMO_NOTICE, generateIRN, generateEWayBill } = require('../services/gstPortal');
 
 const router = express.Router();
@@ -10,7 +10,9 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 
 const STATUSES = ['Paid', 'Partially Paid', 'Unpaid'];
 const PAYMENT_MODES = ['NEFT', 'RTGS', 'Cheque', 'Cash', 'UPI'];
-const CREDIT_DAYS = 30;
+
+// Fallback credit period when a customer master row carries no terms of its own.
+const DEFAULT_CREDIT_DAYS = 30;
 
 // The seller's own state decides intra-state (CGST + SGST) vs inter-state (IGST).
 async function seller() {
@@ -68,9 +70,12 @@ async function createInvoiceFromOrder({ order, customer, sellerRow, invoice_date
   );
 
   const date = invoice_date || todayISO();
+  // The due date follows the credit terms on the customer master (15/30/45 days),
+  // so an invoice to a 15-day buyer ages into the overdue buckets sooner.
+  const creditDays = Number(customer.credit_terms_days) > 0 ? Number(customer.credit_terms_days) : DEFAULT_CREDIT_DAYS;
 
   return db.tx(async (x) => {
-    const invoice_no = await nextDocNo(x, 'INV', 'invoices', 'invoice_no');
+    const invoice_no = await nextFyDocNo(x, 'ST', 'invoices', 'invoice_no');
     const status = paymentStatus(0, totals.total);
 
     const info = await x.run(`INSERT INTO invoices
@@ -80,7 +85,7 @@ async function createInvoiceFromOrder({ order, customer, sellerRow, invoice_date
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $14, $15)
       RETURNING id`,
       [
-        invoice_no, order.id, customer.id, date, due_date || addDays(date, CREDIT_DAYS), status,
+        invoice_no, order.id, customer.id, date, due_date || addDays(date, creditDays), status,
         totals.place_of_supply, sellerRow.gstin, customer.gstin, totals.subtotal,
         totals.cgst, totals.sgst, totals.igst, totals.total, totals.amount_in_words
       ]
@@ -184,6 +189,7 @@ router.post('/', wrap(async (req, res) => {
   }
 
   const customer = await db.get('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
+  if (!customer) return res.status(400).json({ error: 'Order has no valid customer' });
   const sellerRow = await seller();
 
   const id = await createInvoiceFromOrder({
